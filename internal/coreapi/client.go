@@ -44,6 +44,7 @@ type Authority interface {
 	IntrospectMission(context.Context, string, RequestOptions) (MissionStatus, error)
 	RevokeMission(context.Context, string, RevokeRequest, identity.SignedDecisionAttestation, RequestOptions) (Revocation, error)
 	ListExpansions(context.Context, string, RequestOptions) ([]Expansion, error)
+	GetExpansion(context.Context, string, RequestOptions) (json.RawMessage, error)
 	DecideExpansion(context.Context, string, ExpansionDecision, identity.SignedDecisionAttestation, RequestOptions) (ExpansionResult, error)
 	ReadEvents(context.Context, string, string, RequestOptions) (EventPage, error)
 	GetReceipt(context.Context, string, RequestOptions) (SignedReceipt, error)
@@ -540,6 +541,18 @@ func (c *Client) ListExpansions(ctx context.Context, missionRef string, opts Req
 	return out.Items, nil
 }
 
+// GetExpansion returns the authoritative expansion object as raw JSON.
+// The expansion contract is generic; callers strict-decode it locally
+// and fail closed on unknown fields.
+func (c *Client) GetExpansion(ctx context.Context, expansionID string, opts RequestOptions) (json.RawMessage, error) {
+	var raw json.RawMessage
+	path := "/v1/expansion-requests/" + pathEscape(expansionID)
+	if err := c.do(ctx, http.MethodGet, path, nil, nil, &raw, opts); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // DecideExpansion approves or denies an expansion with a signed decision
 // attestation. Denials route to the deny operation.
 func (c *Client) DecideExpansion(ctx context.Context, expansionID string, decision ExpansionDecision, att identity.SignedDecisionAttestation, opts RequestOptions) (ExpansionResult, error) {
@@ -743,6 +756,10 @@ func (g *GatedAuthority) RevokeMission(ctx context.Context, missionRef string, i
 
 func (g *GatedAuthority) ListExpansions(ctx context.Context, missionRef string, opts RequestOptions) ([]Expansion, error) {
 	return g.inner.ListExpansions(ctx, missionRef, opts)
+}
+
+func (g *GatedAuthority) GetExpansion(ctx context.Context, expansionID string, opts RequestOptions) (json.RawMessage, error) {
+	return g.inner.GetExpansion(ctx, expansionID, opts)
 }
 
 func (g *GatedAuthority) DecideExpansion(ctx context.Context, expansionID string, decision ExpansionDecision, att identity.SignedDecisionAttestation, opts RequestOptions) (ExpansionResult, error) {

@@ -147,6 +147,43 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface ExpansionBeginResponse {
+  challenge_id: string;
+  decision: "approve_once" | "deny";
+  effective_expiry: string;
+  expansion_id: string;
+  options: unknown;
+}
+
+export interface ExpansionDecideBeginRequest {
+  decision: "approve_once" | "deny";
+}
+
+export interface ExpansionDecideFinishRequest {
+  assertion: unknown;
+  challenge_id: string;
+}
+
+export interface ExpansionDecidePendingResponse {
+  decision: "approve_once" | "deny";
+  expansion_id: string;
+  reconciliation: string;
+}
+
+export interface ExpansionDecisionResult {
+  authscope_mission_version?: number;
+  decision: "approve_once" | "deny";
+  decision_ref: string;
+  expansion_id: string;
+  pass_id: string;
+  state?: string;
+}
+
+export interface ExpansionListResponse {
+  expansions: PendingExpansion[];
+  pass_id: string;
+}
+
 export interface GitHubBeginRequest {
   repository: string;
 }
@@ -252,6 +289,29 @@ export interface MissionPassReview {
   state: "draft" | "approved" | "launching" | "running" | "awaiting_expansion" | "outcome_pending" | "completed" | "failed" | "revoked" | "expired";
   store_revision: number;
   workspace_id: string;
+}
+
+export interface PendingExpansion {
+  agent_rationale?: string;
+  blocked_operation: string;
+  budget_micros: number;
+  consequence_change: string;
+  current_authority: string;
+  destination: string;
+  expansion_digest: string;
+  expansion_id: string;
+  expired: boolean;
+  normalized_arguments_digest: string;
+  path: string;
+  quantity: number;
+  reason_code: string;
+  ref: string;
+  repository: string;
+  requested_authority: string;
+  requested_expiry: string;
+  resource: string;
+  reversibility: "reversible" | "irreversible";
+  stale: boolean;
 }
 
 export interface ProblemResponse {

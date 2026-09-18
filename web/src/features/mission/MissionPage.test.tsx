@@ -13,6 +13,7 @@ vi.mock('../../shared/api/client', async (importOriginal) => {
   return {
     ...original,
     fetchTimeline: vi.fn(),
+    listPendingExpansions: vi.fn(),
   };
 });
 
@@ -32,6 +33,8 @@ function timeline(): TimelineResponse {
 beforeEach(() => {
   vi.mocked(client.fetchTimeline).mockReset();
   vi.mocked(client.fetchTimeline).mockResolvedValue(timeline());
+  vi.mocked(client.listPendingExpansions).mockReset();
+  vi.mocked(client.listPendingExpansions).mockResolvedValue([]);
 });
 
 describe('missionPassIdFromPath', () => {

@@ -27,6 +27,11 @@ import type {
   RevokeBeginResponse,
   RevokeFinishRequest,
   RevokePendingResponse,
+  ExpansionBeginResponse,
+  ExpansionDecisionResult,
+  ExpansionDecideBeginRequest,
+  ExpansionDecideFinishRequest,
+  PendingExpansion,
   SessionResponse,
   TimelineResponse,
 } from './generated';
@@ -444,5 +449,74 @@ export function finishRevoke(
       return { handedToCli: true as const };
     }
     return (await res.json()) as RevocationResult;
+  });
+}
+
+// listPendingExpansions returns the pending expansion deltas for a pass.
+// Each delta carries the exact canonical fields; unknown fields are
+// rejected by the server, never retained.
+export function listPendingExpansions(
+  passId: string,
+): Promise<PendingExpansion[]> {
+  return request<{ pass_id: string; expansions: PendingExpansion[] }>(
+    `/api/v1/mission-passes/${encodeURIComponent(passId)}/expansions`,
+  ).then((res) => res.expansions);
+}
+
+// beginExpansionDecision starts the one-use passkey ceremony for one
+// pending expansion. The request carries only the decision
+// (approve_once or deny); the browser never submits or widens the
+// authority delta.
+export function beginExpansionDecision(
+  expansionId: string,
+  decision: 'approve_once' | 'deny',
+  idempotencyKey?: string,
+): Promise<ExpansionBeginResponse> {
+  const body: ExpansionDecideBeginRequest = { decision };
+  return postJson<ExpansionBeginResponse>(
+    `/api/v1/expansions/${encodeURIComponent(expansionId)}/decide/begin`,
+    body,
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// finishExpansionDecision completes the passkey ceremony and settles the
+// expansion exactly once upstream. A 202 payload carries reconciliation
+// "pending": the upstream outcome stayed ambiguous and the intent
+// reconciles by the original key.
+export function finishExpansionDecision(
+  expansionId: string,
+  challengeId: string,
+  assertion: unknown,
+  idempotencyKey?: string,
+): Promise<ExpansionDecisionResult | { reconciliation: string }> {
+  const body: ExpansionDecideFinishRequest = {
+    challenge_id: challengeId,
+    assertion,
+  };
+  const path = `/api/v1/expansions/${encodeURIComponent(expansionId)}/decide/finish`;
+  /* v8 ignore next -- defensive: all call sites use compile-time local paths */
+  if (!path.startsWith('/')) {
+    throw new Error(`refusing non-local API path: ${path}`);
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (csrfToken !== null) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+  headers['Idempotency-Key'] = idempotencyKey ?? newIdempotencyKey();
+  return fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 202) {
+      return (await res.json()) as { reconciliation: string };
+    }
+    if (!res.ok) {
+      const title = await problemTitle(res);
+      throw new ApiError(res.status, `request to ${path} failed with status ${res.status}`, title);
+    }
+    return (await res.json()) as ExpansionDecisionResult;
   });
 }

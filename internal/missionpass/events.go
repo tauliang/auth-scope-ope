@@ -591,6 +591,14 @@ func (p *EventProjector) applyEventEffect(ctx context.Context, tx store.Tx, pass
 		return p.movePass(pass, PassRevoked, false)
 	case EventMissionExpired:
 		return p.movePass(pass, PassExpired, false)
+	case EventExpansionRequested:
+		// An expansion request moves a running pass to
+		// awaiting_expansion atomically with the event projection.
+		// The pass returns to running when the decision settles.
+		if PassState(pass.State) == PassRunning {
+			return p.movePass(pass, PassAwaitingExpansion, false)
+		}
+		return false, nil
 	case EventReceiptReady:
 		return p.applyReceipt(ctx, tx, pass, safe)
 	default:

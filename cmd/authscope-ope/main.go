@@ -20,6 +20,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/cli"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/expansion"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/launch"
@@ -171,11 +172,23 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("CLI revocation service: %w", err)
 	}
+	// The expansion service governs the founder's exact one-use
+	// expansion decisions through a passkey ceremony.
+	expansionSvc, err := expansion.NewService(expansion.Config{
+		Store:     st,
+		Authn:     authnSvc,
+		Authority: gated,
+		Attestor:  attestor,
+	})
+	if err != nil {
+		return fmt.Errorf("expansion service: %w", err)
+	}
 	worker, err := reconcile.NewWorker(reconcile.Config{
 		Store:        st,
 		Authority:    gated,
 		Projector:    projector,
 		Revocation:   revocationSvc,
+		Expansion:    expansionSvc,
 		InstanceID:   cfg.InstanceID,
 		WorkspaceID:  cfg.WorkspaceID,
 		PollInterval: 10 * time.Second,
@@ -202,6 +215,7 @@ func runServe() error {
 		Revocation: revocationSvc,
 		CLIRevocation: cliRevocationSvc,
 		Projector:  projector,
+		Expansion:  expansionSvc,
 	})
 	srv := &http.Server{Addr: cfg.BindAddr, Handler: handler}
 	// A server start failure (for example, the port is taken) returns

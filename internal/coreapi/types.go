@@ -419,6 +419,9 @@ type ExpansionResult struct {
 	ExpansionID string `json:"expansion_id"`
 	Decision    string `json:"decision"`
 	DecidedAt   int64  `json:"decided_at"`
+	// MissionVersion is the upstream mission version the decision
+	// produced, used to settle the pass without widening the delta.
+	MissionVersion int64 `json:"mission_version,omitempty"`
 }
 
 // MissionEvent is one authoritative mission event.

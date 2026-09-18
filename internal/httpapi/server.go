@@ -10,6 +10,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/expansion"
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
@@ -50,6 +51,10 @@ type Dependencies struct {
 	// tests that do not exercise the revocation routes; the revocation
 	// routes are registered only when it is present.
 	Revocation *missionpass.RevocationService
+	// Expansion runs the founder's passkey expansion decision ceremony.
+	// Nil in tests that do not exercise the expansion routes; the
+	// expansion routes are registered only when it is present.
+	Expansion *expansion.Service
 	// CLIRevocation runs the result-only loopback PKCE handoff for CLI
 	// revocation. Nil in tests that do not exercise the CLI revocation
 	// routes; they are registered only when it is present.

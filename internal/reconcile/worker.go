@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/expansion"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
@@ -47,12 +48,19 @@ type RevocationReconciler interface {
 	ReconcileRevocation(ctx context.Context, workspaceID, passID string) (*missionpass.RevocationResult, error)
 }
 
+// ExpansionReconciler settles ambiguous expansion decision intents.
+// *expansion.Service satisfies it.
+type ExpansionReconciler interface {
+	ReconcileExpansion(ctx context.Context, workspaceID, expansionID string) (*expansion.DecisionResult, error)
+}
+
 // Config wires the worker.
 type Config struct {
 	Store       store.Store
 	Authority   coreapi.Authority
 	Projector   *missionpass.EventProjector
 	Revocation  RevocationReconciler
+	Expansion   ExpansionReconciler
 	InstanceID  string
 	WorkspaceID string
 	PollInterval time.Duration
@@ -67,6 +75,7 @@ type Worker struct {
 	authority   coreapi.Authority
 	projector   *missionpass.EventProjector
 	revocation  RevocationReconciler
+	expansion   ExpansionReconciler
 	instanceID  string
 	owner       string
 	workspaceID string
@@ -125,6 +134,7 @@ func NewWorker(cfg Config) (*Worker, error) {
 		authority:    cfg.Authority,
 		projector:    cfg.Projector,
 		revocation:   cfg.Revocation,
+		expansion:    cfg.Expansion,
 		instanceID:   cfg.InstanceID,
 		owner:        owner,
 		workspaceID:  cfg.WorkspaceID,
@@ -254,6 +264,7 @@ func (w *Worker) poll(ctx context.Context) {
 		w.clearFailure(pass.PassID)
 	}
 	w.reconcileRevocations(ctx)
+	w.reconcileExpansions(ctx)
 }
 
 // reconcilableState reports the pass states the worker polls: missions
@@ -320,6 +331,27 @@ func (w *Worker) reconcileRevocations(ctx context.Context) {
 		intent := intents[i]
 		if _, err := w.revocation.ReconcileRevocation(ctx, intent.WorkspaceID, intent.PassID); err != nil {
 			w.log("reconcile: revocation intent %s: %v", intent.PassID, err)
+		}
+	}
+}
+
+// reconcileExpansions settles ambiguous expansion decision intents by
+// their original idempotency keys. It uses only ReconcileOperation and
+// authoritative reads; it never repeats DecideExpansion. A still-unknown
+// outcome stays in flight for the next sweep.
+func (w *Worker) reconcileExpansions(ctx context.Context) {
+	if w.expansion == nil {
+		return
+	}
+	intents, err := w.store.ListExpansionIntents(ctx, w.workspaceID, store.ExpansionIntentInFlight)
+	if err != nil {
+		w.log("reconcile: list expansion intents: %v", err)
+		return
+	}
+	for i := range intents {
+		intent := intents[i]
+		if _, err := w.expansion.ReconcileExpansion(ctx, intent.WorkspaceID, intent.ExpansionID); err != nil {
+			w.log("reconcile: expansion intent %s: %v", intent.ExpansionID, err)
 		}
 	}
 }

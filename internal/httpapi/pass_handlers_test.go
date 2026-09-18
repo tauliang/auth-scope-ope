@@ -77,6 +77,7 @@ type passFixture struct {
 	*authTestFixture
 	stub *stubPassAuthority
 	csrf string
+	deps Dependencies
 }
 
 func newPassFixture(t *testing.T) *passFixture {
@@ -191,7 +192,7 @@ func newPassFixture(t *testing.T) *passFixture {
 	}); err != nil {
 		t.Fatalf("seed connection: %v", err)
 	}
-	return &passFixture{authTestFixture: f, stub: stub, csrf: csrf}
+	return &passFixture{authTestFixture: f, stub: stub, csrf: csrf, deps: deps}
 }
 
 // passHeaders builds the exact guard headers for state-changing pass

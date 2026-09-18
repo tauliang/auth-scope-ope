@@ -74,6 +74,7 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 		}))
 	approvalRoutes(mux, svc, approval, authedStateChange)
 	revokeRoutes(mux, deps, authedStateChange)
+	expansionRoutes(mux, deps, authedStateChange)
 	eventRoutes(mux, deps, deps.Projector, deps.Revocation)
 }
 

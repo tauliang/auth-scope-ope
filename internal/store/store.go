@@ -140,6 +140,11 @@ type Store interface {
 	// in the given state, oldest first. The reconciliation worker uses it
 	// to resume ambiguous revocations without re-issuing them.
 	ListRevocationIntents(ctx context.Context, workspaceID, state string) ([]RevocationIntentRecord, error)
+	// ListExpansionIntents returns the expansion decision intents of a
+	// workspace in the given state, oldest first. The reconciliation
+	// worker uses it to resume ambiguous decisions without re-issuing
+	// them.
+	ListExpansionIntents(ctx context.Context, workspaceID, state string) ([]ExpansionIntentRecord, error)
 }
 
 // Tx is the write side of the presentation store. Every method is
@@ -310,6 +315,32 @@ type Tx interface {
 	// CompleteRevocationIntent marks the revocation intent completed with
 	// the containment state and the upstream revocation reference.
 	CompleteRevocationIntent(ctx context.Context, workspaceID, passID, containment, upstreamRef string) error
+	// PutExpansion upserts the locally projected expansion delta for one
+	// upstream expansion request. Only allowlisted canonical fields are
+	// stored; the delta JSON must already be verified against the
+	// expansion digest by the caller.
+	PutExpansion(ctx context.Context, rec ExpansionRecord) error
+	// GetExpansion returns the locally projected expansion, or
+	// ErrNotFound.
+	GetExpansion(ctx context.Context, workspaceID, expansionID string) (ExpansionRecord, error)
+	// ListExpansions returns the locally projected expansions of a pass
+	// in the given status, oldest first.
+	ListExpansions(ctx context.Context, workspaceID, passID, status string) ([]ExpansionRecord, error)
+	// ResolveExpansion marks a locally projected expansion with a final
+	// status such as approved, denied, or expired.
+	ResolveExpansion(ctx context.Context, workspaceID, expansionID, status string) error
+	// PutExpansionIntent upserts the durable local intent for one
+	// expansion decision idempotency key. It is written before the
+	// upstream DecideExpansion call so an ambiguous outcome reconciles by
+	// the same key. Completed intents are never rewritten.
+	PutExpansionIntent(ctx context.Context, rec ExpansionIntentRecord) error
+	// GetExpansionIntent returns the durable expansion decision intent
+	// for an expansion, or ErrNotFound.
+	GetExpansionIntent(ctx context.Context, workspaceID, expansionID string) (ExpansionIntentRecord, error)
+	// CompleteExpansionIntent marks the expansion decision intent
+	// completed with the decision reference and the resulting upstream
+	// mission version.
+	CompleteExpansionIntent(ctx context.Context, workspaceID, expansionID, decisionRef string, resultMissionVersion int64) error
 	// PutCLIRevocation inserts one pending CLI revocation request. A
 	// duplicate request ID returns ErrConflict. Only hashes of secret
 	// values are stored: the raw result code and verifier never reach the
@@ -416,14 +447,14 @@ type MissionPassRecord struct {
 	AttestationDigest string
 	// RunID stays empty on approval: approval creates only the mission, and
 	// a launch run is created later.
-	RunID     string
+	RunID string
 	// Containment is the last known upstream revocation containment:
 	// "acknowledged", "pending", or "partial". Empty until the first
 	// revocation. A pending containment is reconciled by the
 	// server-owned worker.
 	Containment string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ApprovalIntentState values for ApprovalIntentRecord.
@@ -522,6 +553,56 @@ type RevocationIntentRecord struct {
 	UpdatedAt       time.Time
 }
 
+// Expansion statuses for locally projected expansions.
+const (
+	ExpansionPending  = "pending"
+	ExpansionApproved = "approved"
+	ExpansionDenied   = "denied"
+	ExpansionExpired  = "expired"
+)
+
+// ExpansionRecord is one locally projected expansion delta: the exact
+// canonical upstream delta under review. It is the single source of
+// truth the browser reads; only allowlisted canonical fields are
+// stored in DeltaJSON, never raw upstream payloads.
+type ExpansionRecord struct {
+	WorkspaceID     string
+	ExpansionID     string
+	PassID          string
+	MissionRef      string
+	Status          string
+	DeltaJSON       string
+	ExpansionDigest string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Expansion intent states mirror the revocation intent lifecycle.
+const (
+	ExpansionIntentInFlight  = "in_flight"
+	ExpansionIntentCompleted = "completed"
+)
+
+// ExpansionIntentRecord is the durable local intent behind one
+// expansion decision idempotency key. Decision is approve_once or deny;
+// CanonicalDigest is the hex SHA-256 of the canonical expansion
+// binding the founder signed.
+type ExpansionIntentRecord struct {
+	WorkspaceID          string
+	ExpansionID          string
+	PassID               string
+	IdempotencyKey       string
+	Decision             string
+	CanonicalDigest      string
+	State                string
+	AttestationDigest    string
+	AttestationJSON      string
+	UpstreamRef          string
+	ResultMissionVersion int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 // CLIRevocation is the durable record for a result-only loopback PKCE
 // revocation handoff. Only hashes of secret values are stored: the
 // SHA-256 of the one-use result code, never the raw code or verifier.
@@ -529,20 +610,20 @@ type RevocationIntentRecord struct {
 // fixed containment state; no CLI credential or session is issued or
 // stored.
 type CLIRevocation struct {
-	WorkspaceID        string
-	RequestID          string
-	PassID             string
-	State              string // original state, for the loopback redirect
-	CodeChallenge      string // S256 only
-	RedirectURI        string // exact loopback callback
-	CanonicalDigest    string // hex SHA-256 of the server-canonical revocation binding
-	ReasonCode         string // unused: the founder picks the reason in the browser
-	ResultRef          string // opaque revocation-result reference
-	ResultContainment  string // fixed containment state for the result
-	CodeHash           [32]byte
-	ResultConsumedAt   *time.Time
-	ExpiresAt          time.Time
-	CreatedAt          time.Time
+	WorkspaceID       string
+	RequestID         string
+	PassID            string
+	State             string // original state, for the loopback redirect
+	CodeChallenge     string // S256 only
+	RedirectURI       string // exact loopback callback
+	CanonicalDigest   string // hex SHA-256 of the server-canonical revocation binding
+	ReasonCode        string // unused: the founder picks the reason in the browser
+	ResultRef         string // opaque revocation-result reference
+	ResultContainment string // fixed containment state for the result
+	CodeHash          [32]byte
+	ResultConsumedAt  *time.Time
+	ExpiresAt         time.Time
+	CreatedAt         time.Time
 }
 
 // MissionEventRecord is one projected, allowlisted event for a pass.

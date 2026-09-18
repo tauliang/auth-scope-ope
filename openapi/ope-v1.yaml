@@ -1092,6 +1092,147 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/expansions:
+    get:
+      operationId: missionPassExpansionList
+      summary: List pending expansion requests for a mission pass
+      description: >
+        Returns the pending expansion deltas for a pass, synced from
+        the authoritative upstream. Each delta carries the exact
+        canonical fields: expansion ID and digest, the authority pair,
+        the blocked operation, immutable resource identifiers, the
+        normalized-arguments digest, the consequence change, the reason
+        code, reversibility, and the requested expiry. Unknown fields
+        are rejected, never retained. Requires a founder session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pending expansions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionListResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/expansions/{id}/decide/begin:
+    post:
+      operationId: expansionDecideBegin
+      summary: Begin the founder's passkey expansion decision ceremony
+      description: >
+        Starts a one-use WebAuthn decision ceremony for one pending
+        expansion. The request carries only the decision
+        (approve_once or deny); the browser never submits or widens the
+        authority delta. The server binds the exact canonical delta
+        (workspace, pass, mission reference, expected upstream mission
+        version, expansion ID and digest, decision, effective expiry,
+        purpose expansion_decision, audience
+        authscope:expansion-decision) into the challenge. Requires a
+        founder session, exact host, origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpansionDecideBeginRequest'
+      responses:
+        '200':
+          description: Decision challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionBeginResponse'
+        '400':
+          description: Bad request (invalid decision).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Expansion not pending.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The expansion is stale, the binding changed, or the pass cannot decide.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/expansions/{id}/decide/finish:
+    post:
+      operationId: expansionDecideFinish
+      summary: Finish the founder's passkey expansion decision ceremony
+      description: >
+        Completes the one-use WebAuthn decision ceremony: the challenge
+        is consumed, the exact binding is attested, the durable intent
+        is persisted before the upstream mutation, and
+        Authority.DecideExpansion is called exactly once under a
+        deterministic idempotency key. Approval stores the returned
+        upstream mission version and returns the pass to running;
+        denial leaves the prior authority byte-identical. Returns 202
+        with a pending reconciliation state when the upstream outcome
+        is ambiguous; the intent reconciles by the original key without
+        ever repeating the decision. Requires a founder session, exact
+        host, origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpansionDecideFinishRequest'
+      responses:
+        '200':
+          description: The expansion was decided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionDecisionResult'
+        '202':
+          description: The upstream outcome is ambiguous; the decision is pending reconciliation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionDecidePendingResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Expansion or challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The binding changed or a conflicting decision is in progress.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
   /api/v1/cli/revocations:
     post:
       operationId: cliRevocationCreate
@@ -1831,6 +1972,141 @@ components:
       properties:
         pass_id:
           type: string
+        reconciliation:
+          type: string
+          description: The reconciliation state, pending while the ambiguous upstream outcome settles.
+    PendingExpansion:
+      type: object
+      required: [expansion_id, expansion_digest, blocked_operation,
+        resource, repository, ref, path, destination,
+        normalized_arguments_digest, quantity, budget_micros,
+        current_authority, requested_authority, consequence_change,
+        reason_code, reversibility, requested_expiry, stale, expired]
+      properties:
+        expansion_id:
+          type: string
+        expansion_digest:
+          type: string
+        blocked_operation:
+          type: string
+        resource:
+          type: string
+        repository:
+          type: string
+        ref:
+          type: string
+        path:
+          type: string
+        destination:
+          type: string
+        normalized_arguments_digest:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+        budget_micros:
+          type: integer
+          format: int64
+        current_authority:
+          type: string
+        requested_authority:
+          type: string
+        consequence_change:
+          type: string
+        reason_code:
+          type: string
+        reversibility:
+          type: string
+          enum: [reversible, irreversible]
+        requested_expiry:
+          type: string
+          format: date-time
+        agent_rationale:
+          type: string
+          description: Agent-authored rationale, displayed labeled as such, never part of the decision digest.
+        stale:
+          type: boolean
+          description: True when the upstream expansion is no longer pending, or the mission version moved.
+        expired:
+          type: boolean
+          description: True when the requested expiry passed.
+    ExpansionListResponse:
+      type: object
+      required: [pass_id, expansions]
+      properties:
+        pass_id:
+          type: string
+        expansions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingExpansion'
+    ExpansionDecideBeginRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve_once, deny]
+          description: The exact decision. approve_once grants the canonical delta once; deny rejects it.
+    ExpansionBeginResponse:
+      type: object
+      required: [challenge_id, options, expansion_id, decision, effective_expiry]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn assertion options JSON for the decision
+            ceremony, as produced by the server verifier.
+        expansion_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
+        effective_expiry:
+          type: string
+          format: date-time
+          description: min(requested expiry, mission expiry) for approve_once.
+    ExpansionDecideFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: >
+            Opaque WebAuthn assertion response JSON from the founder's
+            passkey, as consumed by the server verifier.
+    ExpansionDecisionResult:
+      type: object
+      required: [expansion_id, pass_id, decision, decision_ref]
+      properties:
+        expansion_id:
+          type: string
+        pass_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
+        decision_ref:
+          type: string
+          description: The durable decision reference for the timeline.
+        authscope_mission_version:
+          type: integer
+          format: int64
+          description: The returned upstream mission version for an approval.
+        state:
+          type: string
+          description: The pass state after the decision settles.
+    ExpansionDecidePendingResponse:
+      type: object
+      required: [expansion_id, decision, reconciliation]
+      properties:
+        expansion_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
         reconciliation:
           type: string
           description: The reconciliation state, pending while the ambiguous upstream outcome settles.

@@ -137,8 +137,12 @@ const (
 	// reference/version, descendants=true, and the normalized reason, and
 	// signs the exact decision attestation before any upstream call.
 	DecisionMissionRevoke DecisionPurpose = "mission_revoke"
-	// DecisionExpansionApproval approves a mission expansion.
-	DecisionExpansionApproval DecisionPurpose = "expansion_approval"
+	// DecisionExpansionDecision gates one expansion decision: the
+	// finish consumes the challenge, binds workspace, pass, mission
+	// reference, expected upstream mission version, expansion ID and
+	// digest, decision, and effective expiry, and signs the exact
+	// decision attestation before any upstream call.
+	DecisionExpansionDecision DecisionPurpose = "expansion_decision"
 	// DecisionCLILaunchAuthorization authorizes one CLI launch of an
 	// approved pass through the browser PKCE handoff.
 	DecisionCLILaunchAuthorization DecisionPurpose = "cli_launch_authorization"
@@ -147,7 +151,7 @@ const (
 // validDecisionPurpose reports whether p is a known purpose.
 func validDecisionPurpose(p DecisionPurpose) bool {
 	switch p {
-	case DecisionPassApproval, DecisionPassRevocation, DecisionMissionRevoke, DecisionExpansionApproval, DecisionCLILaunchAuthorization:
+	case DecisionPassApproval, DecisionPassRevocation, DecisionMissionRevoke, DecisionExpansionDecision, DecisionCLILaunchAuthorization:
 		return true
 	}
 	return false
