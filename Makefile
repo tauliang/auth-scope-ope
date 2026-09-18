@@ -44,10 +44,10 @@ e2e:
 verify: contract-ready
 	$(GO) test -race ./...
 	$(GO) vet ./...
-	node scripts/generate-web-client.mjs --check
 	@if [ ! -f web/node_modules/.modules.yaml ] || [ web/pnpm-lock.yaml -nt web/node_modules/.modules.yaml ]; then \
 		pnpm --dir web install --frozen-lockfile; \
 	fi
+	node scripts/generate-web-client.mjs --check
 	pnpm --dir web lint
 	pnpm --dir web typecheck
 	pnpm --dir web test:coverage

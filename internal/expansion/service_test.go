@@ -27,7 +27,11 @@ import (
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
-var fixtureClock = time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+// fixtureClock() returns a fresh anchor time for each fixture. It must stay
+// within the five-minute passkey freshness window of the real clock
+// because the authn service verifies decision freshness against real
+// time, so a fixed date would go stale and fail every later run.
+func fixtureClock() time.Time { return time.Now().UTC() }
 
 const (
 	fixtureWorkspace      = "ws-test"
@@ -349,7 +353,7 @@ func fixtureDelta() Delta {
 		ConsequenceChange:         "agent may write config/flags.yaml once",
 		ReasonCode:                "config_update_required",
 		Reversibility:             "reversible",
-		RequestedExpiry:           fixtureClock.Add(2 * time.Hour),
+		RequestedExpiry:           fixtureClock().Add(2 * time.Hour).UTC().Truncate(time.Second),
 		AgentRationale:            "The agent asked to flip the feature flag.",
 	}
 }
@@ -363,7 +367,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 		InstanceID: "inst-expansion-1", WorkspaceID: fixtureWorkspace,
 		Hostname: "ope.example.com", Origin: "https://ope.example.com",
 		RPID: "ope.example.com", SessionCookieName: store.DeriveSessionCookieName("inst-expansion-1"),
-		CreatedAt: fixtureClock,
+		CreatedAt: fixtureClock(),
 	}
 	if err := st.WithTx(ctx, func(tx store.Tx) error { return tx.BindInstance(ctx, inst) }); err != nil {
 		t.Fatalf("BindInstance: %v", err)
@@ -371,7 +375,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 	if err := st.WithTx(ctx, func(tx store.Tx) error {
 		if err := tx.CreateFounder(ctx, store.FounderRecord{
 			WorkspaceID: fixtureWorkspace, FounderID: fixtureFounder,
-			DisplayName: "Founder", CreatedAt: fixtureClock,
+			DisplayName: "Founder", CreatedAt: fixtureClock(),
 		}); err != nil {
 			return err
 		}
@@ -381,7 +385,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 			FounderID:    fixtureFounder,
 			PublicKey:    []byte("pk-1"),
 			SignCount:    0,
-			CreatedAt:    fixtureClock,
+			CreatedAt:    fixtureClock(),
 		})
 	}); err != nil {
 		t.Fatalf("seed founder: %v", err)
@@ -392,7 +396,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 		t.Fatalf("authn.NewService: %v", err)
 	}
 
-	missionExpiry := fixtureClock.Add(24 * time.Hour)
+	missionExpiry := fixtureClock().Add(24 * time.Hour)
 	pass := store.MissionPassRecord{
 		WorkspaceID:             fixtureWorkspace,
 		PassID:                  fixturePass,
@@ -423,7 +427,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 			ExpansionID: fixtureExpansion,
 			MissionRef:  fixtureMission,
 			Status:      "pending",
-			RequestedAt: fixtureClock.Unix(),
+			RequestedAt: fixtureClock().Unix(),
 		}},
 		deltas:       map[string]json.RawMessage{fixtureExpansion: deltaJSON},
 		identityKeys: map[string]ed25519.PublicKey{identityDigest: pub},
@@ -442,7 +446,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 		},
 	}
 
-	clock := fixtureClock
+	clock := fixtureClock()
 	svc, err := NewService(Config{
 		Store:           st,
 		Authn:           authnSvc,
@@ -459,7 +463,7 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 		svc:           svc,
 		fake:          fake,
 		st:            st,
-		principal:     authn.Principal{WorkspaceID: fixtureWorkspace, FounderID: fixtureFounder, SessionID: "sess-1", AuthTime: fixtureClock},
+		principal:     authn.Principal{WorkspaceID: fixtureWorkspace, FounderID: fixtureFounder, SessionID: "sess-1", AuthTime: fixtureClock()},
 		delta:         delta,
 		missionExpiry: missionExpiry,
 		clock:         &clock,
@@ -519,7 +523,7 @@ func TestNewServiceValidatesConfig(t *testing.T) {
 		InstanceID: "inst-expansion-validate", WorkspaceID: fixtureWorkspace,
 		Hostname: "ope.example.com", Origin: "https://ope.example.com",
 		RPID: "ope.example.com", SessionCookieName: store.DeriveSessionCookieName("inst-expansion-validate"),
-		CreatedAt: fixtureClock,
+		CreatedAt: fixtureClock(),
 	}
 	if err := st.WithTx(ctx, func(tx store.Tx) error { return tx.BindInstance(ctx, inst) }); err != nil {
 		t.Fatalf("BindInstance: %v", err)
@@ -676,7 +680,7 @@ func TestListPendingRejectsSecondSimultaneousPending(t *testing.T) {
 			ExpansionID: "exp-2",
 			MissionRef:  fixtureMission,
 			Status:      "pending",
-			RequestedAt: fixtureClock.Unix(),
+			RequestedAt: fixtureClock().Unix(),
 		})
 		delta2 := fixtureDelta()
 		delta2.ExpansionID = "exp-2"
@@ -790,7 +794,7 @@ func TestApproveOnceClampsEffectiveExpiryToMission(t *testing.T) {
 		// Requested expiry beyond the mission expiry: the effective
 		// expiry must be the mission expiry, and AuthScope must see
 		// that exact bound.
-		fx.delta.RequestedExpiry = fixtureClock.Add(72 * time.Hour)
+		fx.delta.RequestedExpiry = fixtureClock().Add(72 * time.Hour)
 		fx.delta.ExpansionDigest = CanonicalExpansionDigest(fx.delta)
 		raw, err := json.Marshal(fx.delta)
 		if err != nil {
@@ -843,7 +847,7 @@ func TestBeginDecisionRejectsUnknownExpansion(t *testing.T) {
 
 func TestBeginDecisionRejectsExpiredExpansion(t *testing.T) {
 	fx := newExpansionFixture(t, func(fx *expansionFixture) {
-		fx.delta.RequestedExpiry = fixtureClock.Add(-time.Hour)
+		fx.delta.RequestedExpiry = fixtureClock().Add(-time.Hour)
 		fx.delta.ExpansionDigest = CanonicalExpansionDigest(fx.delta)
 		raw, err := json.Marshal(fx.delta)
 		if err != nil {
