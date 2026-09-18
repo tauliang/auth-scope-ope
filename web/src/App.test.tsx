@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 import type { BootstrapResponse } from './shared/api/generated';
@@ -115,6 +115,119 @@ describe('App', () => {
     vi.mocked(fetch).mockRejectedValue(new ApiError(503, 'not ready'));
     render(<App />);
     expect(await screen.findByRole('alert')).toHaveTextContent('upstream 503');
+  });
+
+  it('threads the CSRF token into GitHub requests after login', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    const states = [
+      bootstrapResponse({ enrolled: true, enrollment_state: 'locked' }),
+      bootstrapResponse({ enrolled: true, enrollment_state: 'authenticated' }),
+    ];
+    let bootstrapCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/v1/bootstrap') {
+        const body = states[Math.min(bootstrapCalls, states.length - 1)];
+        bootstrapCalls += 1;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      if (url === '/api/v1/auth/login/begin') {
+        return new Response(JSON.stringify({ ceremony_id: 'c1', options: {} }), { status: 200 });
+      }
+      if (url === '/api/v1/auth/login/finish') {
+        return new Response(JSON.stringify({ csrf_token: 'csrf-1' }), { status: 200 });
+      }
+      if (url === '/api/v1/connections/github/begin') {
+        return new Response(
+          JSON.stringify({
+            handoff_id: 'hand-1',
+            installation_url: 'https://authscope.local/install?h=h',
+            expires_at: '2026-09-18T01:00:00Z',
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const assign = vi.fn();
+    vi.stubGlobal('location', { pathname: '/', assign, href: 'http://localhost/' });
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /authenticate with passkey/i }));
+    expect(await screen.findByText('Founder enrolled.')).toBeInTheDocument();
+
+    // The GitHub connect form and issue picker are part of the product.
+    expect(screen.getByRole('heading', { name: /github connection/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /pick an issue/i })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/repository \(owner\/name\)/i), 'octo-org/my-repo');
+    await user.click(screen.getByRole('button', { name: /connect repository/i }));
+
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    const beginCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([u]) => String(u) === '/api/v1/connections/github/begin');
+    expect(beginCall).toBeDefined();
+    const headers = new Headers((beginCall as [string, RequestInit])[1].headers);
+    expect(headers.get('X-CSRF-Token')).toBe('csrf-1');
+    expect(headers.get('Idempotency-Key')).toBeTruthy();
+  });
+
+  it('finishes the GitHub connection on the callback path after login', async () => {
+    sessionStorage.clear();
+    sessionStorage.setItem(
+      'ope.github.pendingHandoff',
+      JSON.stringify({ handoff_id: 'hand-1', repository: 'octo-org/my-repo' }),
+    );
+    const user = userEvent.setup();
+    const connection = {
+      connection_id: 'conn-1',
+      workspace_id: 'ws-test',
+      installation_id: 12345,
+      repository_binding_id: 'bind-1',
+      repository_id: 67890,
+      repository_name: 'octo-org/my-repo',
+      permission_status: 'ok',
+      verified_at: '2026-09-18T00:00:00Z',
+    };
+    const states = [
+      bootstrapResponse({ enrolled: true, enrollment_state: 'locked' }),
+      bootstrapResponse({ enrolled: true, enrollment_state: 'authenticated' }),
+    ];
+    let bootstrapCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/v1/bootstrap') {
+        const body = states[Math.min(bootstrapCalls, states.length - 1)];
+        bootstrapCalls += 1;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      if (url === '/api/v1/auth/login/begin') {
+        return new Response(JSON.stringify({ ceremony_id: 'c1', options: {} }), { status: 200 });
+      }
+      if (url === '/api/v1/auth/login/finish') {
+        return new Response(JSON.stringify({ csrf_token: 'csrf-1' }), { status: 200 });
+      }
+      if (url === '/api/v1/connections/github/hand-1/finish') {
+        return new Response(JSON.stringify(connection), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    vi.stubGlobal('location', {
+      pathname: '/connect/github/done',
+      assign: vi.fn(),
+      href: 'http://localhost/connect/github/done',
+    });
+
+    render(<App />);
+    // The round-trip drops in-memory state, so a fresh passkey login runs first.
+    await user.click(await screen.findByRole('button', { name: /authenticate with passkey/i }));
+    expect(await screen.findByRole('heading', { name: /github connected/i })).toBeInTheDocument();
+    expect(screen.getByText('octo-org/my-repo')).toBeInTheDocument();
+    expect(sessionStorage.getItem('ope.github.pendingHandoff')).toBeNull();
   });
 
   it('starts a fresh passkey login when the page holds no CSRF token', async () => {

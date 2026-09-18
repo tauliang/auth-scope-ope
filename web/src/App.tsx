@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
-import { fetchBootstrap, ApiError } from './shared/api/client';
-import type { BootstrapResponse } from './shared/api/generated';
+import { fetchBootstrap, ApiError, setCsrfToken as setClientCsrfToken } from './shared/api/client';
+import type { BootstrapResponse, GitHubConnection, GitHubIssueSnapshot } from './shared/api/generated';
 import PasskeySetup, { type SetupInitialPhase } from './auth/PasskeySetup';
+import {
+  GitHubConnectionComplete,
+  GitHubConnectionStart,
+  githubCompletionPath,
+} from './features/connect/GitHubConnection';
+import IssuePicker from './features/authorize/IssuePicker';
 
 type LoadState =
   | { kind: 'loading' }
@@ -9,11 +15,18 @@ type LoadState =
   | { kind: 'ready'; bootstrap: BootstrapResponse };
 
 // AuthenticatedApp renders the product once the founder holds a live
-// session. The CSRF token is accepted here so the type system keeps it in
-// memory, attached to the session it belongs to; later tasks thread it
-// into state-changing requests via the X-CSRF-Token header.
+// session. The CSRF token is published to the API client in memory so
+// state-changing requests attach it as X-CSRF-Token; it is never written
+// to browser storage.
 function AuthenticatedApp({ bootstrap, csrfToken }: { bootstrap: BootstrapResponse; csrfToken: string }) {
-  void csrfToken;
+  const [connection, setConnection] = useState<GitHubConnection | null>(null);
+  const [authorized, setAuthorized] = useState<GitHubIssueSnapshot | null>(null);
+
+  useEffect(() => {
+    setClientCsrfToken(csrfToken);
+    return () => setClientCsrfToken(null);
+  }, [csrfToken]);
+
   return (
     <main>
       <h1>AuthScope OPE</h1>
@@ -54,6 +67,17 @@ function AuthenticatedApp({ bootstrap, csrfToken }: { bootstrap: BootstrapRespon
           ))}
         </ul>
       </section>
+      <GitHubConnectionStart onConnected={setConnection} />
+      <IssuePicker connection={connection} onAuthorize={setAuthorized} />
+      {authorized && (
+        <section aria-label="authorized issue">
+          <h2>Authorized issue</h2>
+          <p>
+            Issue #{authorized.issue_number} imported from {authorized.repository_full_name}. The
+            authorize flow continues from this snapshot.
+          </p>
+        </section>
+      )}
     </main>
   );
 }
@@ -127,6 +151,24 @@ export default function App() {
       onAuthenticated={refreshAfterAuth}
     />
   );
+
+  // The AuthScope installation redirect lands here. It needs the same
+  // authenticated session plus the in-memory CSRF token to finish the
+  // handoff; without them the login flow below runs first and returns
+  // here afterwards.
+  const onCompletionPath =
+    typeof window !== 'undefined' && window.location.pathname === githubCompletionPath;
+  if (onCompletionPath && bootstrap.enrollment_state === 'authenticated' && csrfToken) {
+    return (
+      <GitHubConnectionComplete
+        csrfToken={csrfToken}
+        workspaceId={bootstrap.workspace?.workspace_id ?? 'unknown'}
+        hostname={bootstrap.workspace?.hostname ?? 'unknown'}
+        onAuthenticated={refreshAfterAuth}
+        onConnected={() => {}}
+      />
+    );
+  }
 
   // An authenticated bootstrap plus a remembered CSRF token means this
   // page holds a live founder session.

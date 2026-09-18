@@ -64,6 +64,25 @@ type Store interface {
 	// GetOfflineRecoveryKey returns the stored offline recovery key hash of
 	// one founder, or ErrNotFound.
 	GetOfflineRecoveryKey(ctx context.Context, workspaceID, founderID string) (OfflineRecoveryKeyRecord, error)
+	// GetConnection returns one workspace-qualified GitHub connection, or
+	// ErrNotFound.
+	GetConnection(ctx context.Context, workspaceID, connectionID string) (ConnectionRecord, error)
+	// ListConnections returns every GitHub connection of a workspace.
+	ListConnections(ctx context.Context, workspaceID string) ([]ConnectionRecord, error)
+	// GetGitHubHandoff returns one workspace-qualified handoff record, or
+	// ErrNotFound.
+	GetGitHubHandoff(ctx context.Context, workspaceID, handoffID string) (GitHubHandoffRecord, error)
+	// GetGitHubHandoffByID returns a handoff by its unguessable ID without
+	// a workspace qualifier. Only the unauthenticated AuthScope callback
+	// may use it; every later step re-verifies the workspace against the
+	// founder session.
+	GetGitHubHandoffByID(ctx context.Context, handoffID string) (GitHubHandoffRecord, error)
+	// GetWorkflowPosture returns the persisted posture check for a
+	// connection and ref, or ErrNotFound.
+	GetWorkflowPosture(ctx context.Context, workspaceID, connectionID, ref string) (WorkflowPostureRecord, error)
+	// LatestWorkflowPosture returns the most recently checked posture for a
+	// connection, or ErrNotFound when none was ever inspected.
+	LatestWorkflowPosture(ctx context.Context, workspaceID, connectionID string) (WorkflowPostureRecord, error)
 	// Close releases the database connection.
 	Close() error
 }
@@ -83,7 +102,30 @@ type Tx interface {
 	// PutConnection upserts a workspace-qualified GitHub connection holding
 	// only the AuthScope repository-binding reference and immutable
 	// repository identity. No GitHub token or App private key is stored.
+	// Reconnection replaces a revoked binding transactionally: the row is
+	// overwritten in full, never merged with the revoked binding's state.
 	PutConnection(context.Context, ConnectionRecord) error
+	// PutGitHubHandoff inserts one handoff record. A duplicate handoff ID
+	// returns ErrConflict.
+	PutGitHubHandoff(context.Context, GitHubHandoffRecord) error
+	// SetGitHubHandoffUpstream records the upstream handoff ID once the
+	// begin call settles. It fails with ErrNotFound for an unknown
+	// handoff.
+	SetGitHubHandoffUpstream(ctx context.Context, workspaceID, handoffID, upstreamHandoffID string) error
+	// RecordGitHubHandoffCallback records the binding-code digest and the
+	// callback time exactly once. A second callback for the same handoff
+	// returns ErrConflict and never replaces the recorded digest.
+	RecordGitHubHandoffCallback(ctx context.Context, workspaceID, handoffID, codeDigest string, at time.Time) error
+	// ConsumeGitHubHandoff marks a handoff consumed after finish settles.
+	// A second consumption returns ErrConflict.
+	ConsumeGitHubHandoff(ctx context.Context, workspaceID, handoffID string, at time.Time) error
+	// PutWorkflowPosture upserts the posture check for a connection and
+	// ref, storing only the digest, head SHA, outcome, reason codes, and
+	// expiry.
+	PutWorkflowPosture(context.Context, WorkflowPostureRecord) error
+	// DeleteConnection removes one workspace-qualified GitHub connection.
+	// Reconnection uses it to replace a revoked binding transactionally.
+	DeleteConnection(ctx context.Context, workspaceID, connectionID string) error
 	// PutMissionPass creates or compare-and-swap updates a mission pass.
 	// expectedStoreRevision is the local CAS token: 0 creates the row with
 	// store_revision 1, any other value must match the stored revision. The
@@ -181,14 +223,53 @@ type MissionEventRecord struct {
 
 // ConnectionRecord is a workspace-qualified GitHub repository connection. It
 // stores only the AuthScope repository-binding reference and immutable
-// repository identity, never tokens or keys.
+// repository identity, never tokens or keys. PermissionStatus is the last
+// verified permission state ("ok", "insufficient", "revoked", or
+// "unknown"); VerifiedAt is when AuthScope last confirmed the binding.
 type ConnectionRecord struct {
 	WorkspaceID          string
 	ConnectionID         string
 	RepositoryBindingRef string
+	InstallationID       int64
 	RepositoryID         int64
 	RepositoryName       string
+	PermissionStatus     string
+	VerifiedAt           time.Time
 	CreatedAt            time.Time
+}
+
+// GitHubHandoffRecord is the durable half of an AuthScope-hosted GitHub
+// App installation handoff. StateHash is the hex SHA-256 of the 256-bit
+// state; BindingCodeDigest is the hex SHA-256 of the one-use binding
+// code, empty until the callback. The raw binding code is never stored:
+// it lives only in a bounded in-memory cache until finish, restart, or
+// expiry.
+type GitHubHandoffRecord struct {
+	WorkspaceID        string
+	HandoffID          string
+	SessionID          string
+	StateHash          string
+	UpstreamHandoffID  string
+	BindingCodeDigest  string
+	AuthScopeOrigin    string
+	ExpiresAt          time.Time
+	CallbackAt         *time.Time
+	ConsumedAt         *time.Time
+}
+
+// WorkflowPostureRecord is one persisted workflow-posture inspection. Only
+// the posture digest, the inspected head SHA, the outcome, reason codes,
+// and expiry are stored; workflow file contents never reach the store.
+type WorkflowPostureRecord struct {
+	WorkspaceID   string
+	ConnectionID  string
+	Ref           string
+	PostureDigest string
+	HeadSHA       string
+	Outcome       string // "clean" or "risky"
+	ReasonCodes   []string
+	ExpiresAt     time.Time
+	CheckedAt     time.Time
 }
 
 // IdempotencyRecord starts an idempotent operation. CanonicalDigest is the

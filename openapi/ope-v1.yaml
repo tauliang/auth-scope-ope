@@ -290,6 +290,156 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/begin:
+    post:
+      operationId: githubBegin
+      summary: Begin the GitHub App installation handoff
+      description: >
+        Starts the AuthScope-hosted GitHub App installation handoff for one
+        owner/name repository. Returns the local handoff ID and the
+        fixed-origin AuthScope installation URL. The upstream one-use
+        binding code is never returned. Requires a founder session, CSRF
+        token, and an Idempotency-Key header.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubBeginRequest'
+      responses:
+        '200':
+          description: Handoff opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/callback:
+    get:
+      operationId: githubCallback
+      summary: Record the AuthScope installation redirect
+      description: >
+        Records the AuthScope redirect carrying exactly the handoff_id, the
+        opaque one-use binding code, and state query parameters. Any other
+        parameter fails closed. Creates no session and never finishes the
+        binding; redirects to the fixed same-origin completion path. The
+        query is never logged or reflected.
+      parameters:
+        - name: handoff_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '303':
+          description: Redirect to the fixed completion path.
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/{handoff_id}/finish:
+    post:
+      operationId: githubFinish
+      summary: Finish the GitHub App installation handoff
+      description: >
+        Completes the handoff through AuthScope using the binding code
+        captured from the redirect, then persists the repository connection.
+        Requires the original founder session, a CSRF token, and an
+        Idempotency-Key header. Reconnection replaces a revoked binding
+        transactionally.
+      parameters:
+        - name: handoff_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubFinishRequest'
+      responses:
+        '200':
+          description: Connection persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubConnection'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/{id}/issues/{number}:
+    get:
+      operationId: githubIssue
+      summary: Import a trusted issue snapshot
+      description: >
+        Imports the AuthScope-brokered trusted issue snapshot for a
+        workspace connection, pinned to the connection's immutable
+        repository ID, and pairs it with the workflow-posture check that
+        gates launch. Closed, stale, or revoked results fail closed. Only
+        signed posture metadata is persisted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Trusted snapshot and posture.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubIssueResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Connection or issue not available.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -454,3 +604,110 @@ components:
       properties:
         error:
           type: string
+    GitHubBeginRequest:
+      type: object
+      required: [repository]
+      properties:
+        repository:
+          type: string
+          description: The owner/name repository to connect.
+    GitHubBeginResponse:
+      type: object
+      required: [handoff_id, installation_url, expires_at]
+      properties:
+        handoff_id:
+          type: string
+        installation_url:
+          type: string
+          description: >
+            The fixed-origin AuthScope installation URL. The upstream
+            one-use binding code is never returned.
+        expires_at:
+          type: string
+          format: date-time
+    GitHubFinishRequest:
+      type: object
+      description: >
+        Empty JSON object. The handoff ID travels in the path; the binding
+        code was captured from the AuthScope redirect server-side.
+    GitHubConnection:
+      type: object
+      required: [connection_id, workspace_id, repository_binding_id, installation_id, repository_id, repository_name, permission_status, verified_at]
+      properties:
+        connection_id:
+          type: string
+        workspace_id:
+          type: string
+        repository_binding_id:
+          type: string
+        installation_id:
+          type: integer
+        repository_id:
+          type: integer
+        repository_name:
+          type: string
+        permission_status:
+          type: string
+        verified_at:
+          type: string
+          format: date-time
+    GitHubIssueSnapshot:
+      type: object
+      required: [workspace_id, repository_binding_id, installation_id, repository_id, repository_full_name, issue_number, source_revision, source_digest, default_branch, base_sha, objective, acceptance_criteria]
+      properties:
+        workspace_id:
+          type: string
+        repository_binding_id:
+          type: string
+        installation_id:
+          type: integer
+        repository_id:
+          type: integer
+        repository_full_name:
+          type: string
+        issue_number:
+          type: integer
+        source_revision:
+          type: string
+        source_digest:
+          type: string
+          description: >
+            AuthScope's canonical digest of the issue source. Never derived
+            locally.
+        default_branch:
+          type: string
+        base_sha:
+          type: string
+        objective:
+          type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+    GitHubPosture:
+      type: object
+      required: [outcome, reason_codes, head_sha, checked_at, expires_at]
+      properties:
+        outcome:
+          type: string
+          enum: [clean, risky]
+        reason_codes:
+          type: array
+          items:
+            type: string
+        head_sha:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    GitHubIssueResponse:
+      type: object
+      required: [snapshot, posture]
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/GitHubIssueSnapshot'
+        posture:
+          $ref: '#/components/schemas/GitHubPosture'

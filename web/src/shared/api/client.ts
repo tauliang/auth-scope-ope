@@ -9,6 +9,11 @@ import type {
   BootstrapResponse,
   CeremonyBeginResponse,
   CeremonyFinishRequest,
+  GitHubBeginRequest,
+  GitHubBeginResponse,
+  GitHubConnection,
+  GitHubFinishRequest,
+  GitHubIssueResponse,
   ProblemResponse,
   SessionResponse,
 } from './generated';
@@ -63,13 +68,45 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // postJson performs a same-origin JSON POST. The server requires exactly
-// application/json.
-function postJson<T>(path: string, body: unknown): Promise<T> {
+// application/json. When a session CSRF token is held in memory it is
+// attached as X-CSRF-Token; extra headers (such as Idempotency-Key) may be
+// supplied per call.
+function postJson<T>(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (csrfToken !== null) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+  if (extraHeaders) {
+    for (const [name, value] of Object.entries(extraHeaders)) {
+      headers[name] = value;
+    }
+  }
   return request<T>(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
+}
+
+// csrfToken is the session-bound CSRF token held in memory for the page
+// lifetime. It is never written to browser storage.
+let csrfToken: string | null = null;
+
+// setCsrfToken stores the session CSRF token in memory after login, or
+// clears it on logout. State-changing requests attach it automatically.
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+// newIdempotencyKey mints a unique key per mutating call so retried
+// requests replay instead of duplicating the operation.
+export function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // fetchBootstrap loads the first-paint product state.
@@ -130,4 +167,34 @@ export function authLoginBegin(): Promise<CeremonyBeginResponse> {
 export function authLoginFinish(ceremonyId: string, response: unknown): Promise<SessionResponse> {
   const body: CeremonyFinishRequest = { ceremony_id: ceremonyId, response };
   return postJson<SessionResponse>('/api/v1/auth/login/finish', body);
+}
+
+// githubBegin opens the AuthScope-hosted installation handoff for one
+// owner/name repository. The response carries the handoff ID and the
+// fixed-origin installation URL; the upstream binding code never reaches
+// the browser.
+export function githubBegin(repository: string): Promise<GitHubBeginResponse> {
+  const body: GitHubBeginRequest = { repository };
+  return postJson<GitHubBeginResponse>('/api/v1/connections/github/begin', body, {
+    'Idempotency-Key': newIdempotencyKey(),
+  });
+}
+
+// githubFinish completes the handoff whose redirect the server already
+// recorded, persisting the repository connection.
+export function githubFinish(handoffId: string): Promise<GitHubConnection> {
+  const body: GitHubFinishRequest = {};
+  return postJson<GitHubConnection>(
+    `/api/v1/connections/github/${encodeURIComponent(handoffId)}/finish`,
+    body,
+    { 'Idempotency-Key': newIdempotencyKey() },
+  );
+}
+
+// githubIssue imports the trusted issue snapshot for a connection,
+// paired with the workflow-posture check that gates launch.
+export function githubIssue(connectionId: string, issueNumber: number): Promise<GitHubIssueResponse> {
+  return request<GitHubIssueResponse>(
+    `/api/v1/connections/github/${encodeURIComponent(connectionId)}/issues/${issueNumber}`,
+  );
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -20,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -31,6 +32,7 @@ var migrations = []struct {
 }{
 	{"001_initial", "migrations/001_initial.sql"},
 	{"002_authn", "migrations/002_authn.sql"},
+	{"003_github", "migrations/003_github.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -217,6 +219,54 @@ func (t *sqliteTx) PutConnection(ctx context.Context, rec ConnectionRecord) erro
 	return putConnection(ctx, t.tx, rec)
 }
 
+func (s *sqliteStore) GetGitHubHandoff(ctx context.Context, workspaceID, handoffID string) (GitHubHandoffRecord, error) {
+	return getGitHubHandoff(ctx, s.db, workspaceID, handoffID)
+}
+
+func (s *sqliteStore) GetGitHubHandoffByID(ctx context.Context, handoffID string) (GitHubHandoffRecord, error) {
+	return getGitHubHandoffByID(ctx, s.db, handoffID)
+}
+
+func (s *sqliteStore) GetConnection(ctx context.Context, workspaceID, connectionID string) (ConnectionRecord, error) {
+	return getConnection(ctx, s.db, workspaceID, connectionID)
+}
+
+func (s *sqliteStore) ListConnections(ctx context.Context, workspaceID string) ([]ConnectionRecord, error) {
+	return listConnections(ctx, s.db, workspaceID)
+}
+
+func (s *sqliteStore) GetWorkflowPosture(ctx context.Context, workspaceID, connectionID, ref string) (WorkflowPostureRecord, error) {
+	return getWorkflowPosture(ctx, s.db, workspaceID, connectionID, ref)
+}
+
+func (s *sqliteStore) LatestWorkflowPosture(ctx context.Context, workspaceID, connectionID string) (WorkflowPostureRecord, error) {
+	return latestWorkflowPosture(ctx, s.db, workspaceID, connectionID)
+}
+
+func (t *sqliteTx) PutGitHubHandoff(ctx context.Context, rec GitHubHandoffRecord) error {
+	return putGitHubHandoff(ctx, t.tx, rec)
+}
+
+func (t *sqliteTx) SetGitHubHandoffUpstream(ctx context.Context, workspaceID, handoffID, upstreamHandoffID string) error {
+	return setGitHubHandoffUpstream(ctx, t.tx, workspaceID, handoffID, upstreamHandoffID)
+}
+
+func (t *sqliteTx) RecordGitHubHandoffCallback(ctx context.Context, workspaceID, handoffID, codeDigest string, at time.Time) error {
+	return recordGitHubHandoffCallback(ctx, t.tx, workspaceID, handoffID, codeDigest, at)
+}
+
+func (t *sqliteTx) ConsumeGitHubHandoff(ctx context.Context, workspaceID, handoffID string, at time.Time) error {
+	return consumeGitHubHandoff(ctx, t.tx, workspaceID, handoffID, at)
+}
+
+func (t *sqliteTx) PutWorkflowPosture(ctx context.Context, rec WorkflowPostureRecord) error {
+	return putWorkflowPosture(ctx, t.tx, rec)
+}
+
+func (t *sqliteTx) DeleteConnection(ctx context.Context, workspaceID, connectionID string) error {
+	return deleteConnection(ctx, t.tx, workspaceID, connectionID)
+}
+
 func (t *sqliteTx) PutMissionPass(ctx context.Context, rec MissionPassRecord, expectedStoreRevision int64) error {
 	return putMissionPass(ctx, t.tx, rec, expectedStoreRevision)
 }
@@ -318,20 +368,304 @@ func putConnection(ctx context.Context, c dbConn, rec ConnectionRecord) error {
 	if rec.WorkspaceID == "" || rec.ConnectionID == "" {
 		return fmt.Errorf("store: put connection: workspace and connection IDs are required")
 	}
+	if rec.RepositoryBindingRef == "" {
+		return fmt.Errorf("store: put connection: repository binding reference is required")
+	}
 	_, err := c.ExecContext(ctx, `INSERT INTO github_connections
-		(workspace_id, connection_id, repository_binding_ref, repository_id, repository_name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		(workspace_id, connection_id, repository_binding_ref, installation_id, repository_id,
+		 repository_name, permission_status, verified_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, connection_id) DO UPDATE SET
 			repository_binding_ref = excluded.repository_binding_ref,
+			installation_id = excluded.installation_id,
 			repository_id = excluded.repository_id,
 			repository_name = excluded.repository_name,
+			permission_status = excluded.permission_status,
+			verified_at = excluded.verified_at,
 			created_at = excluded.created_at`,
-		rec.WorkspaceID, rec.ConnectionID, rec.RepositoryBindingRef,
-		rec.RepositoryID, rec.RepositoryName, formatTime(rec.CreatedAt))
+		rec.WorkspaceID, rec.ConnectionID, rec.RepositoryBindingRef, rec.InstallationID,
+		rec.RepositoryID, rec.RepositoryName, rec.PermissionStatus,
+		formatTime(rec.VerifiedAt), formatTime(rec.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("store: put connection: %w", err)
 	}
 	return nil
+}
+
+func scanConnection(row *sql.Row) (ConnectionRecord, error) {
+	var rec ConnectionRecord
+	var verified, created string
+	err := row.Scan(&rec.WorkspaceID, &rec.ConnectionID, &rec.RepositoryBindingRef,
+		&rec.InstallationID, &rec.RepositoryID, &rec.RepositoryName,
+		&rec.PermissionStatus, &verified, &created)
+	if err == sql.ErrNoRows {
+		return ConnectionRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return ConnectionRecord{}, fmt.Errorf("store: get connection: %w", err)
+	}
+	if rec.VerifiedAt, err = parseTime(verified); err != nil {
+		return ConnectionRecord{}, fmt.Errorf("store: get connection: %w", err)
+	}
+	if rec.CreatedAt, err = parseTime(created); err != nil {
+		return ConnectionRecord{}, fmt.Errorf("store: get connection: %w", err)
+	}
+	return rec, nil
+}
+
+const connectionColumns = `workspace_id, connection_id, repository_binding_ref, installation_id,
+	repository_id, repository_name, permission_status, verified_at, created_at`
+
+func getConnection(ctx context.Context, c dbConn, workspaceID, connectionID string) (ConnectionRecord, error) {
+	return scanConnection(c.QueryRowContext(ctx, `SELECT `+connectionColumns+`
+		FROM github_connections WHERE workspace_id = ? AND connection_id = ?`, workspaceID, connectionID))
+}
+
+func listConnections(ctx context.Context, c dbConn, workspaceID string) ([]ConnectionRecord, error) {
+	rows, err := c.QueryContext(ctx, `SELECT `+connectionColumns+`
+		FROM github_connections WHERE workspace_id = ? ORDER BY created_at ASC`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list connections: %w", err)
+	}
+	defer rows.Close()
+	var out []ConnectionRecord
+	for rows.Next() {
+		var rec ConnectionRecord
+		var verified, created string
+		if err := rows.Scan(&rec.WorkspaceID, &rec.ConnectionID, &rec.RepositoryBindingRef,
+			&rec.InstallationID, &rec.RepositoryID, &rec.RepositoryName,
+			&rec.PermissionStatus, &verified, &created); err != nil {
+			return nil, fmt.Errorf("store: list connections: %w", err)
+		}
+		if rec.VerifiedAt, err = parseTime(verified); err != nil {
+			return nil, fmt.Errorf("store: list connections: %w", err)
+		}
+		if rec.CreatedAt, err = parseTime(created); err != nil {
+			return nil, fmt.Errorf("store: list connections: %w", err)
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list connections: %w", err)
+	}
+	return out, nil
+}
+
+func putGitHubHandoff(ctx context.Context, c dbConn, rec GitHubHandoffRecord) error {
+	if rec.WorkspaceID == "" || rec.HandoffID == "" || rec.SessionID == "" {
+		return fmt.Errorf("store: put github handoff: workspace, handoff, and session IDs are required")
+	}
+	if rec.StateHash == "" || rec.AuthScopeOrigin == "" {
+		return fmt.Errorf("store: put github handoff: state hash and AuthScope origin are required")
+	}
+	_, err := c.ExecContext(ctx, `INSERT INTO github_handoffs
+		(workspace_id, handoff_id, session_id, state_hash, upstream_handoff_id,
+		 binding_code_digest, authscope_origin, expires_at, callback_at, consumed_at)
+		VALUES (?, ?, ?, ?, ?, '', ?, ?, NULL, NULL)`,
+		rec.WorkspaceID, rec.HandoffID, rec.SessionID, rec.StateHash,
+		rec.UpstreamHandoffID, rec.AuthScopeOrigin, formatTime(rec.ExpiresAt))
+	if err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("%w: github handoff %q", ErrConflict, rec.HandoffID)
+		}
+		return fmt.Errorf("store: put github handoff: %w", err)
+	}
+	return nil
+}
+
+func scanGitHubHandoff(row *sql.Row) (GitHubHandoffRecord, error) {
+	var rec GitHubHandoffRecord
+	var expires string
+	var callbackAt, consumedAt sql.NullString
+	err := row.Scan(&rec.WorkspaceID, &rec.HandoffID, &rec.SessionID, &rec.StateHash,
+		&rec.UpstreamHandoffID, &rec.BindingCodeDigest, &rec.AuthScopeOrigin,
+		&expires, &callbackAt, &consumedAt)
+	if err == sql.ErrNoRows {
+		return GitHubHandoffRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return GitHubHandoffRecord{}, fmt.Errorf("store: get github handoff: %w", err)
+	}
+	if rec.ExpiresAt, err = parseTime(expires); err != nil {
+		return GitHubHandoffRecord{}, fmt.Errorf("store: get github handoff: %w", err)
+	}
+	if callbackAt.Valid {
+		t, err := parseTime(callbackAt.String)
+		if err != nil {
+			return GitHubHandoffRecord{}, fmt.Errorf("store: get github handoff: %w", err)
+		}
+		rec.CallbackAt = &t
+	}
+	if consumedAt.Valid {
+		t, err := parseTime(consumedAt.String)
+		if err != nil {
+			return GitHubHandoffRecord{}, fmt.Errorf("store: get github handoff: %w", err)
+		}
+		rec.ConsumedAt = &t
+	}
+	return rec, nil
+}
+
+const handoffColumns = `workspace_id, handoff_id, session_id, state_hash, upstream_handoff_id,
+	binding_code_digest, authscope_origin, expires_at, callback_at, consumed_at`
+
+func getGitHubHandoff(ctx context.Context, c dbConn, workspaceID, handoffID string) (GitHubHandoffRecord, error) {
+	return scanGitHubHandoff(c.QueryRowContext(ctx, `SELECT `+handoffColumns+`
+		FROM github_handoffs WHERE workspace_id = ? AND handoff_id = ?`, workspaceID, handoffID))
+}
+
+func getGitHubHandoffByID(ctx context.Context, c dbConn, handoffID string) (GitHubHandoffRecord, error) {
+	return scanGitHubHandoff(c.QueryRowContext(ctx, `SELECT `+handoffColumns+`
+		FROM github_handoffs WHERE handoff_id = ?`, handoffID))
+}
+
+func setGitHubHandoffUpstream(ctx context.Context, c dbConn, workspaceID, handoffID, upstreamHandoffID string) error {
+	if upstreamHandoffID == "" {
+		return fmt.Errorf("store: set github handoff upstream: upstream handoff ID is required")
+	}
+	res, err := c.ExecContext(ctx, `UPDATE github_handoffs SET upstream_handoff_id = ?
+		WHERE workspace_id = ? AND handoff_id = ? AND upstream_handoff_id = ''`,
+		upstreamHandoffID, workspaceID, handoffID)
+	if err != nil {
+		return fmt.Errorf("store: set github handoff upstream: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: set github handoff upstream: %w", err)
+	}
+	if n == 1 {
+		return nil
+	}
+	if _, err := getGitHubHandoff(ctx, c, workspaceID, handoffID); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: github handoff %q already has an upstream handoff", ErrConflict, handoffID)
+}
+
+func recordGitHubHandoffCallback(ctx context.Context, c dbConn, workspaceID, handoffID, codeDigest string, at time.Time) error {
+	if codeDigest == "" {
+		return fmt.Errorf("store: record github handoff callback: code digest is required")
+	}
+	res, err := c.ExecContext(ctx, `UPDATE github_handoffs
+		SET binding_code_digest = ?, callback_at = ?
+		WHERE workspace_id = ? AND handoff_id = ? AND callback_at IS NULL`,
+		codeDigest, formatTime(at), workspaceID, handoffID)
+	if err != nil {
+		return fmt.Errorf("store: record github handoff callback: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: record github handoff callback: %w", err)
+	}
+	if n == 1 {
+		return nil
+	}
+	if _, err := getGitHubHandoff(ctx, c, workspaceID, handoffID); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: github handoff %q callback already recorded", ErrConflict, handoffID)
+}
+
+func consumeGitHubHandoff(ctx context.Context, c dbConn, workspaceID, handoffID string, at time.Time) error {
+	res, err := c.ExecContext(ctx, `UPDATE github_handoffs SET consumed_at = ?
+		WHERE workspace_id = ? AND handoff_id = ? AND consumed_at IS NULL`,
+		formatTime(at), workspaceID, handoffID)
+	if err != nil {
+		return fmt.Errorf("store: consume github handoff: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: consume github handoff: %w", err)
+	}
+	if n == 1 {
+		return nil
+	}
+	if _, err := getGitHubHandoff(ctx, c, workspaceID, handoffID); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: github handoff %q already consumed", ErrConflict, handoffID)
+}
+
+func deleteConnection(ctx context.Context, c dbConn, workspaceID, connectionID string) error {
+	res, err := c.ExecContext(ctx, `DELETE FROM github_connections
+		WHERE workspace_id = ? AND connection_id = ?`, workspaceID, connectionID)
+	if err != nil {
+		return fmt.Errorf("store: delete connection: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete connection: %w", err)
+	}
+	if n != 1 {
+		return fmt.Errorf("%w: connection %q", ErrNotFound, connectionID)
+	}
+	return nil
+}
+
+func putWorkflowPosture(ctx context.Context, c dbConn, rec WorkflowPostureRecord) error {
+	if rec.WorkspaceID == "" || rec.ConnectionID == "" || rec.Ref == "" {
+		return fmt.Errorf("store: put workflow posture: workspace, connection, and ref are required")
+	}
+	if rec.PostureDigest == "" || rec.HeadSHA == "" || rec.Outcome == "" {
+		return fmt.Errorf("store: put workflow posture: digest, head SHA, and outcome are required")
+	}
+	reasons, err := encodeReasonCodes(rec.ReasonCodes)
+	if err != nil {
+		return err
+	}
+	_, err = c.ExecContext(ctx, `INSERT INTO github_posture_checks
+		(workspace_id, connection_id, ref, posture_digest, head_sha, outcome, reason_codes, expires_at, checked_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, connection_id, ref) DO UPDATE SET
+			posture_digest = excluded.posture_digest,
+			head_sha = excluded.head_sha,
+			outcome = excluded.outcome,
+			reason_codes = excluded.reason_codes,
+			expires_at = excluded.expires_at,
+			checked_at = excluded.checked_at`,
+		rec.WorkspaceID, rec.ConnectionID, rec.Ref, rec.PostureDigest, rec.HeadSHA,
+		rec.Outcome, reasons, formatTime(rec.ExpiresAt), formatTime(rec.CheckedAt))
+	if err != nil {
+		return fmt.Errorf("store: put workflow posture: %w", err)
+	}
+	return nil
+}
+
+func scanWorkflowPosture(row *sql.Row) (WorkflowPostureRecord, error) {
+	var rec WorkflowPostureRecord
+	var reasons, expires, checked string
+	err := row.Scan(&rec.WorkspaceID, &rec.ConnectionID, &rec.Ref, &rec.PostureDigest,
+		&rec.HeadSHA, &rec.Outcome, &reasons, &expires, &checked)
+	if err == sql.ErrNoRows {
+		return WorkflowPostureRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return WorkflowPostureRecord{}, fmt.Errorf("store: get workflow posture: %w", err)
+	}
+	if rec.ReasonCodes, err = decodeReasonCodes(reasons); err != nil {
+		return WorkflowPostureRecord{}, fmt.Errorf("store: get workflow posture: %w", err)
+	}
+	if rec.ExpiresAt, err = parseTime(expires); err != nil {
+		return WorkflowPostureRecord{}, fmt.Errorf("store: get workflow posture: %w", err)
+	}
+	if rec.CheckedAt, err = parseTime(checked); err != nil {
+		return WorkflowPostureRecord{}, fmt.Errorf("store: get workflow posture: %w", err)
+	}
+	return rec, nil
+}
+
+const postureColumns = `workspace_id, connection_id, ref, posture_digest, head_sha, outcome, reason_codes, expires_at, checked_at`
+
+func getWorkflowPosture(ctx context.Context, c dbConn, workspaceID, connectionID, ref string) (WorkflowPostureRecord, error) {
+	return scanWorkflowPosture(c.QueryRowContext(ctx, `SELECT `+postureColumns+`
+		FROM github_posture_checks WHERE workspace_id = ? AND connection_id = ? AND ref = ?`,
+		workspaceID, connectionID, ref))
+}
+
+func latestWorkflowPosture(ctx context.Context, c dbConn, workspaceID, connectionID string) (WorkflowPostureRecord, error) {
+	return scanWorkflowPosture(c.QueryRowContext(ctx, `SELECT `+postureColumns+`
+		FROM github_posture_checks WHERE workspace_id = ? AND connection_id = ?
+		ORDER BY checked_at DESC LIMIT 1`, workspaceID, connectionID))
 }
 
 func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expectedStoreRevision int64) error {
@@ -515,6 +849,33 @@ func completeIdempotency(ctx context.Context, c dbConn, workspaceID, key string,
 
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// encodeReasonCodes renders reason codes as a JSON array for storage.
+// The codes are a fixed allowlist; encoding never fails on valid input,
+// but the error is surfaced rather than silently dropped.
+func encodeReasonCodes(codes []string) (string, error) {
+	if codes == nil {
+		codes = []string{}
+	}
+	raw, err := json.Marshal(codes)
+	if err != nil {
+		return "", fmt.Errorf("store: encode reason codes: %w", err)
+	}
+	return string(raw), nil
+}
+
+// decodeReasonCodes parses the stored JSON reason-code array. A corrupt
+// value fails closed instead of silently yielding no reasons.
+func decodeReasonCodes(raw string) ([]string, error) {
+	var codes []string
+	if err := json.Unmarshal([]byte(raw), &codes); err != nil {
+		return nil, fmt.Errorf("store: decode reason codes: %w", err)
+	}
+	if codes == nil {
+		codes = []string{}
+	}
+	return codes, nil
 }
 
 func formatTime(t time.Time) string {

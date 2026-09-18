@@ -66,6 +66,7 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("/readyz", handleReadyz(deps.Contract, deps.Gate))
 	mux.HandleFunc("/api/v1/bootstrap", handleBootstrap(deps))
 	authRoutes(mux, deps)
+	githubRoutes(mux, deps, newGitHubServices(deps))
 
 	return withSecurityHeaders(http.MaxBytesHandler(mux, maxBodyBytes))
 }

@@ -60,6 +60,57 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface GitHubBeginRequest {
+  repository: string;
+}
+
+export interface GitHubBeginResponse {
+  expires_at: string;
+  handoff_id: string;
+  installation_url: string;
+}
+
+export interface GitHubConnection {
+  connection_id: string;
+  installation_id: number;
+  permission_status: string;
+  repository_binding_id: string;
+  repository_id: number;
+  repository_name: string;
+  verified_at: string;
+  workspace_id: string;
+}
+
+export type GitHubFinishRequest = Record<string, never>;
+
+export interface GitHubIssueResponse {
+  posture: GitHubPosture;
+  snapshot: GitHubIssueSnapshot;
+}
+
+export interface GitHubIssueSnapshot {
+  acceptance_criteria: string[];
+  base_sha: string;
+  default_branch: string;
+  installation_id: number;
+  issue_number: number;
+  objective: string;
+  repository_binding_id: string;
+  repository_full_name: string;
+  repository_id: number;
+  source_digest: string;
+  source_revision: string;
+  workspace_id: string;
+}
+
+export interface GitHubPosture {
+  checked_at: string;
+  expires_at: string;
+  head_sha: string;
+  outcome: "clean" | "risky";
+  reason_codes: string[];
+}
+
 export interface HealthResponse {
   status: "ok";
 }

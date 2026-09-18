@@ -43,6 +43,7 @@ function tsType(schema, name) {
       return `${tsType(schema.items, name + "[]")}[]`;
     case "object": {
       const props = schema.properties || {};
+      if (Object.keys(props).length === 0) return "Record<string, never>";
       const required = new Set(schema.required || []);
       const lines = Object.keys(props)
         .sort()
