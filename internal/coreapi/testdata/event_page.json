@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"event_id": "evt-1", "event_type": "mission.approved", "occurred_at": 1790000000, "payload": {"state": "active"}}
+  ],
+  "next_cursor": "cursor-1"
+}

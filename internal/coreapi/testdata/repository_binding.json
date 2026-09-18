@@ -1,0 +1,8 @@
+{
+  "binding_id": "binding-1",
+  "workspace_id": "ws-test",
+  "installation_id": "inst-1",
+  "repository_id": "12345",
+  "repository": "octo/repo",
+  "created_at": 1790000000
+}

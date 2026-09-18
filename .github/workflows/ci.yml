@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [feat/ope]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: contract gate
+        run: make contract-ready
+      - name: privacy scan
+        run: make privacy-check
+      - name: credential channel check
+        run: make credential-check
+      - name: full verification
+        run: make verify
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+      - name: install browser (best effort)
+        run: pnpm --dir web exec playwright install --with-deps chromium || true
+      - name: browser e2e
+        run: make e2e
+
+  # Release gates: the real-integration and usability gates must fail
+  # closed in CI, where no real AuthScope, gateway, runtime, or GitHub
+  # backend exists. A preflight that passed here would mean the gate
+  # substitutes a fake; that must never happen.
+  release-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+      - name: real-integration preflight fails closed without real prerequisites
+        run: |
+          set +e
+          scripts/run-real-integration.sh --preflight > preflight.log 2>&1
+          code=$?
+          set -e
+          cat preflight.log
+          if [ "$code" -eq 0 ]; then
+            echo "preflight passed without real prerequisites; the gate must fail closed" >&2
+            exit 1
+          fi
+          grep -q "^BLOCKED: AUTH_SCOPE_URL" preflight.log || { echo "preflight did not name the absent prerequisites" >&2; exit 1; }
+          grep -q "76fe961" scripts/run-real-integration.sh || { echo "preflight does not reject the audit baseline pin" >&2; exit 1; }
+      - name: real-integration tests skip without prerequisites
+        run: GOSUMDB=off go test ./test/integration/ -count=1 -v 2>&1 | grep -q "SKIP\|ok " || exit 1
+      - name: usability gate plan renders
+        run: scripts/run-usability-gate.sh --plan | grep -q "eight first-time sessions"
+      - name: usability gate fails closed by default
+        run: |
+          if scripts/run-usability-gate.sh 2>&1 | grep -q "^BLOCKED:"; then
+            echo "usability gate fails closed as required"
+          else
+            echo "usability gate did not fail closed" >&2
+            exit 1
+          fi
+      - name: release evidence records the pinned revisions
+        run: |
+          grep -q "ope-v1.0.0" docs/release-evidence.md
+          grep -q "9516e098c5ee9196b6bc73f3633123d173d4249fbc0a5063843924d53b43af76" docs/release-evidence.md
+          grep -q "BLOCKED" docs/release-evidence.md

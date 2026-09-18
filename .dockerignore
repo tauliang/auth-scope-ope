@@ -1,0 +1,13 @@
+# Keep the build context small and secret-free.
+.git
+.gitignore
+web/node_modules
+web/dist
+web/coverage
+**/*.test
+**/*_test.go
+/tmp
+var/
+data/
+*.log
+.DS_Store

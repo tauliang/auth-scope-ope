@@ -1,0 +1,7 @@
+{
+  "workspace_id": "ws-test",
+  "contained": true,
+  "generation": 3,
+  "attestation_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "contained_at": 1790000000
+}

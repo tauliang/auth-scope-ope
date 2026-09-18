@@ -1,0 +1,2334 @@
+openapi: 3.1.0
+info:
+  title: AuthScope OPE Edition local API
+  version: 0.1.0
+  description: >
+    Local product API for the AuthScope OPE Edition. This service presents
+    authority, verifies local founder authentication, and renders verified
+    results. The upstream AuthScope service remains the only authority
+    evaluator.
+servers:
+  - url: /api/v1
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Process health
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness against the locked upstream contract
+      responses:
+        '200':
+          description: The locked contract is verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: The locked contract is not satisfied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+  /api/v1/bootstrap:
+    get:
+      operationId: getBootstrap
+      summary: First-paint product state
+      description: >
+        Returns only enrollment state, the immutable workspace binding, the
+        upstream compatibility status, and supported authority display labels.
+      responses:
+        '200':
+          description: Bootstrap state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/bootstrap/begin:
+    post:
+      operationId: authBootstrapBegin
+      summary: Open a founder enrollment ceremony
+      description: >
+        Verifies the terminal bootstrap code and opens a short-lived
+        enrollment ceremony, returned as a bootstrap ceremony cookie. An
+        already-authenticated client is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapBeginRequest'
+      responses:
+        '200':
+          description: Enrollment ceremony opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: Invalid bootstrap code.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Already authenticated or already enrolled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/register/begin:
+    post:
+      operationId: authBootstrapRegisterBegin
+      summary: Begin a bootstrap passkey registration
+      description: >
+        Issues WebAuthn creation options for the first passkey, or for the
+        second passkey when the recovery method is a passkey.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRegisterBeginRequest'
+      responses:
+        '200':
+          description: Registration ceremony issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeremonyBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/register/finish:
+    post:
+      operationId: authBootstrapRegisterFinish
+      summary: Finish a bootstrap passkey registration
+      description: >
+        Verifies the attestation response. The raw response is opaque to the
+        API: it is passed through to the WebAuthn verifier and never stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CeremonyFinishRequest'
+      responses:
+        '200':
+          description: Passkey registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapRegisterFinishResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Credential already registered or ceremony reused.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/bootstrap/recovery/begin:
+    post:
+      operationId: authBootstrapRecoveryBegin
+      summary: Begin the independent recovery method
+      description: >
+        Starts the second passkey registration or issues the one-time
+        offline recovery key, shown exactly once. Requires the first passkey
+        to be registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRecoveryBeginRequest'
+      responses:
+        '200':
+          description: Recovery method started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapRecoveryBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/bootstrap/complete:
+    post:
+      operationId: authBootstrapComplete
+      summary: Complete founder enrollment
+      description: >
+        Confirms the independent recovery method, consumes the bootstrap
+        code, and creates the first founder session. Sets the session cookie
+        and clears the bootstrap ceremony cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapCompleteRequest'
+      responses:
+        '200':
+          description: Enrollment complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/login/begin:
+    post:
+      operationId: authLoginBegin
+      summary: Begin a founder passkey login
+      description: Issues WebAuthn request options for the enrolled founder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty JSON object.
+      responses:
+        '200':
+          description: Login ceremony issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeremonyBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: No founder enrolled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/login/finish:
+    post:
+      operationId: authLoginFinish
+      summary: Finish a founder passkey login
+      description: >
+        Verifies the assertion and rotates the founder session, setting a
+        fresh session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CeremonyFinishRequest'
+      responses:
+        '200':
+          description: Login complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/begin:
+    post:
+      operationId: githubBegin
+      summary: Begin the GitHub App installation handoff
+      description: >
+        Starts the AuthScope-hosted GitHub App installation handoff for one
+        owner/name repository. Returns the local handoff ID and the
+        fixed-origin AuthScope installation URL. The upstream one-use
+        binding code is never returned. Requires a founder session, CSRF
+        token, and an Idempotency-Key header.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubBeginRequest'
+      responses:
+        '200':
+          description: Handoff opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/callback:
+    get:
+      operationId: githubCallback
+      summary: Record the AuthScope installation redirect
+      description: >
+        Records the AuthScope redirect carrying exactly the handoff_id, the
+        opaque one-use binding code, and state query parameters. Any other
+        parameter fails closed. Creates no session and never finishes the
+        binding; redirects to the fixed same-origin completion path. The
+        query is never logged or reflected.
+      parameters:
+        - name: handoff_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '303':
+          description: Redirect to the fixed completion path.
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/{handoff_id}/finish:
+    post:
+      operationId: githubFinish
+      summary: Finish the GitHub App installation handoff
+      description: >
+        Completes the handoff through AuthScope using the binding code
+        captured from the redirect, then persists the repository connection.
+        Requires the original founder session, a CSRF token, and an
+        Idempotency-Key header. Reconnection replaces a revoked binding
+        transactionally.
+      parameters:
+        - name: handoff_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubFinishRequest'
+      responses:
+        '200':
+          description: Connection persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubConnection'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/connections/github/{id}/issues/{number}:
+    get:
+      operationId: githubIssue
+      summary: Import a trusted issue snapshot
+      description: >
+        Imports the AuthScope-brokered trusted issue snapshot for a
+        workspace connection, pinned to the connection's immutable
+        repository ID, and pairs it with the workflow-posture check that
+        gates launch. Closed, stale, or revoked results fail closed. Only
+        signed posture metadata is persisted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Trusted snapshot and posture.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubIssueResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Connection or issue not available.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/drafts:
+    post:
+      operationId: missionPassDraftCreate
+      summary: Shape and create the exact AuthScope proposal
+      description: >
+        Refreshes the trusted issue snapshot and workflow posture, shapes
+        the mission inside the fixed template, creates the exact upstream
+        proposal, and persists the returned values byte-for-byte for
+        founder review. Only the two editable limits are founder-supplied;
+        everything else derives from the trusted snapshot and the fixed
+        agent kit. Requires a founder session, CSRF token, and an
+        Idempotency-Key header. Retrying with the same key returns the
+        same pass instead of duplicating it. A 202 means the upstream
+        outcome stayed ambiguous; the pass carries reconciliation
+        "pending" and the same request can be retried.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionPassDraftCreateRequest'
+      responses:
+        '201':
+          description: Draft created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '200':
+          description: Idempotent replay of an already-created draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Connection not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: A request with this idempotency key is in flight.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '422':
+          description: Upstream draft outside the fixed template.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/draft:
+    put:
+      operationId: missionPassDraftRevise
+      summary: Narrow the two editable draft limits
+      description: >
+        Applies the only two founder edits to a draft: an earlier expiry
+        and a lower aggregate-cost ceiling. Every other field is
+        immutable; attempts to edit protected fields fail with 422, and
+        widening edits fail with 400. A valid edit reruns shaping and
+        creates a new upstream proposal with a fresh idempotency key,
+        writing an immutable revision with draft_version + 1. Requires a
+        founder session, CSRF token, and an Idempotency-Key header. A 202
+        means the upstream outcome stayed ambiguous; the pass carries
+        reconciliation "pending" and the same request can be retried.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionPassDraftReviseRequest'
+      responses:
+        '200':
+          description: Draft revised.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request, or a widening edit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Revision conflict or stale source.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '422':
+          description: Protected field edit, or upstream outside the template.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/approve/begin:
+    post:
+      operationId: missionPassApproveBegin
+      summary: Begin the passkey approval ceremony for a mission pass
+      description: >
+        Starts a one-use WebAuthn decision ceremony bound to the exact
+        proposal revision and the founder session. The browser supplies no
+        binding or authority fields; every bound value comes from the
+        server-side challenge record. Requires a founder session, CSRF
+        token, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not a draft, or an approval is reconciling.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/approve/finish:
+    post:
+      operationId: missionPassApproveFinish
+      summary: Finish the passkey approval and create only the mission
+      description: >
+        Verifies the passkey assertion against the bound challenge, signs a
+        two-minute decision attestation with the workload key, and approves
+        the exact proposal upstream. Approval creates only the mission: no
+        runtime policy, no lease, no launch descriptor, no sealed
+        credential, and no run. A 202 means the upstream outcome stayed
+        ambiguous; the pass carries reconciliation "pending" and the read
+        endpoint reconciles the recorded operation. Requires a founder
+        session, CSRF token, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalFinishRequest'
+      responses:
+        '200':
+          description: The exact proposal was approved and the mission was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResult'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass or approval challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The proposal changed since the approval began, or the pass left draft.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}:
+    get:
+      operationId: missionPassGet
+      summary: Read a mission pass for review
+      description: >
+        Returns the immutable proposal revision plus the trusted snapshot
+        content it was shaped from, for founder review. Requires a founder
+        session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pass review payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations:
+    post:
+      operationId: cliAuthorizationCreate
+      summary: Create a one-use CLI launch authorization
+      description: >
+        Called by the local CLI to open a one-use browser PKCE handoff for
+        launching an approved mission pass. The pass must be approved and
+        unexpired; the request binds the S256 PKCE challenge and the exact
+        loopback redirect URI, and the CLI supplies no other authority
+        fields. Returns the exact approved proposal digest, agent-kit
+        identity, ordered runner arguments, and invocation digest for the
+        CLI to recompute and compare, plus the browser URL to print.
+        Requires no browser session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIAuthorizationCreateRequest'
+      responses:
+        '201':
+          description: Authorization created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIAuthorizationCreateResponse'
+        '400':
+          description: Bad request (invalid pass, PKCE challenge, or redirect URI).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not approved or has expired.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations/{id}/approve/begin:
+    post:
+      operationId: cliAuthorizationApproveBegin
+      summary: Begin the browser decision for a CLI launch authorization
+      description: >
+        Starts a one-use WebAuthn decision ceremony approving the exact
+        proposal bindings pinned at create time (pass, proposal digest,
+        invocation digest, agent-kit identity, ordered runner arguments,
+        mission reference and version). The browser supplies no binding or
+        authority fields; every bound value comes from the server-side
+        challenge record. Requires a founder session, CSRF token, exact Host
+        and Origin headers, JSON content type, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIAuthorizationApproveBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The authorization expired, was already decided, or a launch binding changed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations/{id}/approve/finish:
+    post:
+      operationId: cliAuthorizationApproveFinish
+      summary: Finish the browser decision and redirect to the CLI loopback callback
+      description: >
+        Verifies the passkey assertion against the bound challenge, signs a
+        short-lived decision attestation for the CLI launch, and marks the
+        authorization consumed. On success the response is a 302 redirect to
+        the exact loopback callback URI bound at create time, carrying the
+        one-use authorization code and the original state. The browser UI
+        shows only "Return to the CLI" afterwards; the code, verifier, and
+        sealed runtime material are never rendered. Requires a founder
+        session, CSRF token, exact Host and Origin headers, JSON content
+        type, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalFinishRequest'
+      responses:
+        '302':
+          description: Redirect to the loopback callback with the one-use code.
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization or decision challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The authorization expired, was already consumed, or a launch binding changed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/token:
+    post:
+      operationId: cliTokenExchange
+      summary: Exchange one authorization code for the sealed launch envelope
+      description: >
+        Called by the local CLI after the browser handoff. Exchanges the
+        one-use authorization code plus the PKCE verifier for the sealed
+        signed envelope of the prepared governed run. Exactly one upstream
+        launch preparation happens per code: a concurrent double submit or
+        a retry after a lost response returns only the original sealed
+        result. The sealed envelope is opaque base64url; only the CLI's
+        ephemeral private key opens it. Requires no browser session;
+        per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLITokenRequest'
+      responses:
+        '200':
+          description: Exchange succeeded; the run is prepared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLITokenResponse'
+        '400':
+          description: Bad request (malformed code or verifier).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization code not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The exchange conflicts with the approved launch binding.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: The launch authorization is no longer valid; authorize again in the browser.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: The exchange outcome is ambiguous; retry the exchange.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/events:
+    get:
+      operationId: missionPassEvents
+      summary: Read the safe projected event timeline of a mission pass
+      description: >
+        Returns only the safely projected upstream events for the pass,
+        ordered by cursor, with the projection state, reconciliation
+        state, compatibility, staleness, and containment. Reading
+        reconciles any pending revocation intent first. Requires a
+        founder session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cursor after which to return events; defaults to the start.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+          description: Maximum events to return; capped at 100.
+      responses:
+        '200':
+          description: The projected timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/receipt:
+    get:
+      operationId: missionPassReceipt
+      summary: Read the private verified receipt view of a mission pass
+      description: >
+        Returns the privacy-filtered receipt status for the pass:
+        pending while the upstream receipt is absent, the fixed
+        verified projection after local verification, or the fixed
+        unverifiable reason code. The view never carries the raw
+        envelope, issue bodies, logs, patches, transcripts, private
+        detail URLs, or secrets. Requires a founder session. There is
+        no manual check publication endpoint; the worker publishes the
+        privacy-safe GitHub check automatically.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The private receipt view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptStatus'
+        '401':
+          description: Authentication required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/revoke/begin:
+    post:
+      operationId: missionPassRevokeBegin
+      summary: Begin the founder's passkey revocation ceremony for a mission pass
+      description: >
+        Starts a one-use WebAuthn decision ceremony revoking the exact
+        mission bindings pinned server-side (pass, mission reference and
+        version, revocation digest). The browser supplies only the
+        normalized reason code; every bound value comes from the
+        server-side record. Requires a founder session, exact host,
+        origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeBeginRequest'
+      responses:
+        '200':
+          description: Revocation challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeBeginResponse'
+        '400':
+          description: Bad request (invalid reason code).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/revoke/finish:
+    post:
+      operationId: missionPassRevokeFinish
+      summary: Finish the founder's passkey revocation ceremony
+      description: >
+        Completes the one-use WebAuthn decision ceremony and revokes the
+        mission upstream exactly once under a deterministic idempotency
+        key. Returns 202 with a pending reconciliation state when the
+        upstream outcome is ambiguous; the revocation intent is durable
+        and the timeline reconciles it. When the request carries a CLI
+        revocation request ID, the one-use result code is minted after
+        the result settles or becomes pending, and the response is a 302
+        redirect to the exact loopback callback with the code and the
+        original state. Requires a founder session, exact host, origin,
+        and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeFinishRequest'
+      responses:
+        '200':
+          description: The mission was revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationResult'
+        '202':
+          description: The upstream outcome is ambiguous; the revocation intent is durable and reconciles through the timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokePendingResponse'
+        '302':
+          description: Redirect to the exact loopback callback with the one-use result code and the original state, for the CLI handoff.
+        '400':
+          description: Bad request (invalid ceremony).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Revocation challenge or pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state, or the ceremony binding mismatches.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: The upstream outcome is ambiguous; reconcile through the timeline.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/expansions:
+    get:
+      operationId: missionPassExpansionList
+      summary: List pending expansion requests for a mission pass
+      description: >
+        Returns the pending expansion deltas for a pass, synced from
+        the authoritative upstream. Each delta carries the exact
+        canonical fields: expansion ID and digest, the authority pair,
+        the blocked operation, immutable resource identifiers, the
+        normalized-arguments digest, the consequence change, the reason
+        code, reversibility, and the requested expiry. Unknown fields
+        are rejected, never retained. Requires a founder session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pending expansions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionListResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/expansions/{id}/decide/begin:
+    post:
+      operationId: expansionDecideBegin
+      summary: Begin the founder's passkey expansion decision ceremony
+      description: >
+        Starts a one-use WebAuthn decision ceremony for one pending
+        expansion. The request carries only the decision
+        (approve_once or deny); the browser never submits or widens the
+        authority delta. The server binds the exact canonical delta
+        (workspace, pass, mission reference, expected upstream mission
+        version, expansion ID and digest, decision, effective expiry,
+        purpose expansion_decision, audience
+        authscope:expansion-decision) into the challenge. Requires a
+        founder session, exact host, origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpansionDecideBeginRequest'
+      responses:
+        '200':
+          description: Decision challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionBeginResponse'
+        '400':
+          description: Bad request (invalid decision).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Expansion not pending.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The expansion is stale, the binding changed, or the pass cannot decide.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/expansions/{id}/decide/finish:
+    post:
+      operationId: expansionDecideFinish
+      summary: Finish the founder's passkey expansion decision ceremony
+      description: >
+        Completes the one-use WebAuthn decision ceremony: the challenge
+        is consumed, the exact binding is attested, the durable intent
+        is persisted before the upstream mutation, and
+        Authority.DecideExpansion is called exactly once under a
+        deterministic idempotency key. Approval stores the returned
+        upstream mission version and returns the pass to running;
+        denial leaves the prior authority byte-identical. Returns 202
+        with a pending reconciliation state when the upstream outcome
+        is ambiguous; the intent reconciles by the original key without
+        ever repeating the decision. Requires a founder session, exact
+        host, origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpansionDecideFinishRequest'
+      responses:
+        '200':
+          description: The expansion was decided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionDecisionResult'
+        '202':
+          description: The upstream outcome is ambiguous; the decision is pending reconciliation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpansionDecidePendingResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Expansion or challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The binding changed or a conflicting decision is in progress.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/revocations:
+    post:
+      operationId: cliRevocationCreate
+      summary: Create a result-only CLI revocation handoff
+      description: >
+        Called by the local CLI to open a result-only browser PKCE
+        handoff for revoking a governed mission. The pass must be in a
+        revocable state; the request binds the pass and the exact
+        server-canonical revocation digest, the S256 PKCE challenge, and
+        the exact loopback redirect URI. Returns the browser URL for the
+        founder's decision, where the founder picks the revocation
+        reason. The CLI exchanges the one-use result code for only the
+        opaque result reference and the fixed containment state; no
+        session or credential is ever issued. Requires no browser
+        session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIRevocationCreateRequest'
+      responses:
+        '201':
+          description: Revocation handoff created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIRevocationCreateResponse'
+        '400':
+          description: Bad request (invalid PKCE challenge or redirect URI).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/revocations/token:
+    post:
+      operationId: cliRevocationTokenExchange
+      summary: Exchange one revocation result code for the result reference
+      description: >
+        Called by the local CLI after the browser decision. Exchanges
+        the one-use result code plus the PKCE verifier for only the
+        opaque result reference and the fixed containment state. Exactly
+        one revocation happens per request: a retry with the same code
+        after a lost response returns the original result reference, and
+        a wrong verifier or redirect is rejected without distinguishing
+        the cause. Requires no browser session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIRevocationExchangeRequest'
+      responses:
+        '200':
+          description: Exchange succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIRevocationExchangeResponse'
+        '400':
+          description: Bad request (malformed code, verifier, redirect, or state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: The code, verifier, redirect URI, or state does not match.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Result code not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The revocation result is not minted or has expired.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ReadyResponse:
+      type: object
+      required: [status, core_version]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        core_version:
+          type: string
+        problems:
+          type: array
+          items:
+            type: string
+    WorkspaceBinding:
+      type: object
+      required: [workspace_id, hostname]
+      properties:
+        workspace_id:
+          type: string
+        hostname:
+          type: string
+    CompatibilityStatus:
+      type: object
+      required: [status, core_version]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        core_version:
+          type: string
+        problems:
+          type: array
+          items:
+            type: string
+    BootstrapResponse:
+      type: object
+      required: [enrolled, enrollment_state, compatibility, authority_labels, telemetry_state]
+      properties:
+        enrolled:
+          type: boolean
+        enrollment_state:
+          type: string
+          enum: [needs_bootstrap, needs_recovery_method, locked, authenticated]
+        workspace:
+          $ref: '#/components/schemas/WorkspaceBinding'
+        compatibility:
+          $ref: '#/components/schemas/CompatibilityStatus'
+        authority_labels:
+          type: array
+          items:
+            type: string
+        telemetry_state:
+          type: string
+          enum: [enabled, disabled]
+          description: >-
+            The configured product telemetry state. "enabled" only when
+            the operator explicitly set OPE_TELEMETRY=enabled; the Connect
+            screen renders it so the state is always visible.
+    BootstrapBeginRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: The one-time code printed on the server terminal.
+    BootstrapBeginResponse:
+      type: object
+      required: [expires_at]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+    BootstrapRegisterBeginRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+    CeremonyBeginResponse:
+      type: object
+      required: [ceremony_id, options]
+      properties:
+        ceremony_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn ceremony options JSON (creation or request
+            options as produced by the server verifier).
+    CeremonyFinishRequest:
+      type: object
+      required: [ceremony_id, response]
+      properties:
+        ceremony_id:
+          type: string
+        response:
+          description: >
+            Opaque WebAuthn response JSON from navigator.credentials. It is
+            verified and never stored.
+    BootstrapRegisterFinishResponse:
+      type: object
+      required: [credential_id]
+      properties:
+        credential_id:
+          type: string
+    BootstrapRecoveryBeginRequest:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [passkey, offline_key]
+    BootstrapRecoveryBeginResponse:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [passkey, offline_key]
+        ceremony_id:
+          type: string
+        options:
+          description: WebAuthn creation options for the recovery passkey.
+        recovery_key:
+          type: string
+          description: >
+            The one-time offline recovery key, returned exactly once. The
+            server stores only its hash.
+    BootstrapCompleteRequest:
+      type: object
+      properties:
+        recovery_confirmation:
+          type: string
+          description: >
+            The offline recovery key, proving possession before enrollment
+            completes. Omitted when the recovery method is a second passkey.
+    SessionResponse:
+      type: object
+      required: [csrf_token]
+      properties:
+        csrf_token:
+          type: string
+          description: >
+            The session-bound CSRF token. The UI keeps it in memory and
+            sends it as the X-CSRF-Token header; it is never stored in
+            browser storage.
+    ProblemResponse:
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    GitHubBeginRequest:
+      type: object
+      required: [repository]
+      properties:
+        repository:
+          type: string
+          description: The owner/name repository to connect.
+    GitHubBeginResponse:
+      type: object
+      required: [handoff_id, installation_url, expires_at]
+      properties:
+        handoff_id:
+          type: string
+        installation_url:
+          type: string
+          description: >
+            The fixed-origin AuthScope installation URL. The upstream
+            one-use binding code is never returned.
+        expires_at:
+          type: string
+          format: date-time
+    GitHubFinishRequest:
+      type: object
+      description: >
+        Empty JSON object. The handoff ID travels in the path; the binding
+        code was captured from the AuthScope redirect server-side.
+    GitHubConnection:
+      type: object
+      required: [connection_id, workspace_id, repository_binding_id, installation_id, repository_id, repository_name, permission_status, verified_at]
+      properties:
+        connection_id:
+          type: string
+        workspace_id:
+          type: string
+        repository_binding_id:
+          type: string
+        installation_id:
+          type: integer
+        repository_id:
+          type: integer
+        repository_name:
+          type: string
+        permission_status:
+          type: string
+        verified_at:
+          type: string
+          format: date-time
+    GitHubIssueSnapshot:
+      type: object
+      required: [workspace_id, repository_binding_id, installation_id, repository_id, repository_full_name, issue_number, source_revision, source_digest, default_branch, base_sha, objective, acceptance_criteria]
+      properties:
+        workspace_id:
+          type: string
+        repository_binding_id:
+          type: string
+        installation_id:
+          type: integer
+        repository_id:
+          type: integer
+        repository_full_name:
+          type: string
+        issue_number:
+          type: integer
+        source_revision:
+          type: string
+        source_digest:
+          type: string
+          description: >
+            AuthScope's canonical digest of the issue source. Never derived
+            locally.
+        default_branch:
+          type: string
+        base_sha:
+          type: string
+        objective:
+          type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+    GitHubPosture:
+      type: object
+      required: [outcome, reason_codes, head_sha, checked_at, expires_at]
+      properties:
+        outcome:
+          type: string
+          enum: [clean, risky]
+        reason_codes:
+          type: array
+          items:
+            type: string
+        head_sha:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    GitHubIssueResponse:
+      type: object
+      required: [snapshot, posture]
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/GitHubIssueSnapshot'
+        posture:
+          $ref: '#/components/schemas/GitHubPosture'
+    MissionPassDraftCreateRequest:
+      type: object
+      required: [connection_id, issue_number, expires_at, max_aggregate_cost_micros]
+      properties:
+        connection_id:
+          type: string
+        issue_number:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassDraftReviseRequest:
+      type: object
+      required: [expected_store_revision, expected_draft_version, expires_at, max_aggregate_cost_micros]
+      properties:
+        expected_store_revision:
+          type: integer
+        expected_draft_version:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassLimits:
+      type: object
+      required: [expires_at, max_aggregate_cost_micros]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassReview:
+      type: object
+      required:
+        [workspace_id, pass_id, store_revision, draft_version,
+         authscope_mission_version, proposal_id, proposal_digest,
+         invocation_digest, agent_kit_id, agent_kit_version,
+         runner_arguments, limits, state, reconciliation, connection_id,
+         issue_number, repository_name, objective, acceptance_criteria]
+      properties:
+        workspace_id:
+          type: string
+        pass_id:
+          type: string
+        store_revision:
+          type: integer
+        draft_version:
+          type: integer
+        authscope_mission_version:
+          type: integer
+        proposal_id:
+          type: string
+        proposal_digest:
+          type: string
+        approved_proposal_digest:
+          type: string
+        source_revision:
+          type: string
+        source_digest:
+          type: string
+        base_sha:
+          type: string
+        mission_branch:
+          type: string
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
+        invocation_digest:
+          type: string
+        limits:
+          $ref: '#/components/schemas/MissionPassLimits'
+        state:
+          type: string
+          enum: [draft, approved, launching, running, awaiting_expansion, outcome_pending, completed, failed, revoked, expired]
+        reconciliation:
+          type: string
+          enum: [settled, pending]
+        connection_id:
+          type: string
+        issue_number:
+          type: integer
+        repository_name:
+          type: string
+        objective:
+          type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+        shaped_draft:
+          type: object
+        mission_ref:
+          type: string
+        mission_hash:
+          type: string
+        approval_decision_ref:
+          type: string
+        attestation_digest:
+          type: string
+        run_id:
+          type: string
+    ApprovalBeginResponse:
+      type: object
+      required: [challenge_id, options]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn request options JSON for the approval decision
+            ceremony, as produced by the server verifier.
+    ApprovalFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: >
+            Opaque WebAuthn assertion JSON from the credential, as the
+            server verifier expects.
+    CLIAuthorizationCreateRequest:
+      type: object
+      required: [pass_id, redirect_uri, state, code_challenge, code_challenge_method, ephemeral_public_key]
+      properties:
+        pass_id:
+          type: string
+        redirect_uri:
+          type: string
+          description: Exact loopback callback URI (http://127.0.0.1:<port>/callback).
+        state:
+          type: string
+          description: Opaque 256-bit state, base64url with no padding, returned verbatim to the callback.
+        code_challenge:
+          type: string
+          description: S256 PKCE code challenge, base64url with no padding.
+        code_challenge_method:
+          type: string
+          enum: [S256]
+          description: PKCE code challenge method. Only S256 is accepted.
+        ephemeral_public_key:
+          type: string
+          description: >
+            X25519 ephemeral public key, base64url with no padding,
+            binding the launch decision to this CLI instance.
+    CLIAuthorizationCreateResponse:
+      type: object
+      required: [authorization_id, browser_url, proposal_digest, agent_kit_id, agent_kit_version, runner_arguments, invocation_digest]
+      properties:
+        authorization_id:
+          type: string
+        browser_url:
+          type: string
+          description: The browser URL the CLI prints for the founder to approve the launch.
+        proposal_digest:
+          type: string
+          description: The exact approved proposal digest, for the CLI to recompute and compare.
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
+          description: The ordered runner arguments, for the CLI to recompute and compare.
+        invocation_digest:
+          type: string
+          description: The pinned launch invocation digest, for the CLI to recompute and compare.
+    CLITokenRequest:
+      type: object
+      required: [code, verifier]
+      properties:
+        code:
+          type: string
+          description: The one-use authorization code, base64url with no padding.
+        verifier:
+          type: string
+          description: The S256 PKCE verifier, base64url with no padding.
+    CLITokenResponse:
+      type: object
+      required: [run_id, mission_ref, sealed_envelope]
+      properties:
+        run_id:
+          type: string
+          description: The prepared governed run ID.
+        mission_ref:
+          type: string
+          description: The mission reference the run was prepared for.
+        sealed_envelope:
+          type: string
+          description: >
+            The sealed signed envelope, base64url with no padding. Opaque
+            to the server; only the CLI's ephemeral private key opens it.
+    CLIAuthorizationApproveBeginResponse:
+      type: object
+      required: [challenge_id, assertion_options, pass_id, repository_name, issue_number, proposal_digest, invocation_digest, agent_kit_id, agent_kit_version, runner_arguments]
+      properties:
+        challenge_id:
+          type: string
+        assertion_options:
+          description: >
+            Opaque WebAuthn request options JSON for the decision ceremony,
+            as produced by the server verifier.
+        pass_id:
+          type: string
+        repository_name:
+          type: string
+        issue_number:
+          type: integer
+        proposal_digest:
+          type: string
+        invocation_digest:
+          type: string
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
+    ApprovalResult:
+      type: object
+      required: [workspace_id, mission_ref, mission_hash, authscope_mission_version, approval_decision_ref]
+      properties:
+        workspace_id:
+          type: string
+        mission_ref:
+          type: string
+        mission_hash:
+          type: string
+        authscope_mission_version:
+          type: integer
+        approval_decision_ref:
+          type: string
+    TimelineEvent:
+      type: object
+      required: [event_id, cursor, type, occurred_at, authscope_mission_version, resource_digest]
+      properties:
+        event_id:
+          type: string
+        cursor:
+          type: string
+        type:
+          type: string
+          description: One of the safely projectable event types.
+        occurred_at:
+          type: string
+          format: date-time
+        authscope_mission_version:
+          type: integer
+        resource_digest:
+          type: string
+        reason_code:
+          type: string
+        branch:
+          type: string
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        check_kind:
+          type: string
+        check_outcome:
+          type: string
+    TimelineResponse:
+      type: object
+      required: [pass_id, state, reconciliation, events, cursor, compatible, stale, containment]
+      properties:
+        pass_id:
+          type: string
+        state:
+          type: string
+          description: The projected pass state.
+        reconciliation:
+          type: string
+          description: The current reconciliation state of the projection.
+        repository_name:
+          type: string
+          description: The verified repository binding (owner/repo) for trusted branch and PR links.
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        cursor:
+          type: string
+          description: The cursor of the last returned event, for pagination.
+        compatible:
+          type: boolean
+        stale:
+          type: boolean
+        incompatibility_reason:
+          type: string
+        containment:
+          type: string
+          description: The fixed containment state for a revoked pass.
+    ReceiptStatus:
+      type: object
+      required: [pass_id, verification]
+      properties:
+        pass_id:
+          type: string
+        verification:
+          type: string
+          description: One of pending, verified, or unverifiable.
+          enum: [pending, verified, unverifiable]
+        reason_code:
+          type: string
+          description: The fixed unverifiable reason code, when verification is unverifiable.
+          enum: [bad_signature, bad_key, bad_payload, bad_binding]
+        view:
+          $ref: '#/components/schemas/ReceiptView'
+        publication:
+          $ref: '#/components/schemas/ReceiptPublicationStatus'
+    ReceiptView:
+      type: object
+      required: [verification, receipt_id, grant_id, mission_ref, workspace_id, receipt_digest, outcome]
+      properties:
+        verification:
+          type: string
+        receipt_id:
+          type: string
+        grant_id:
+          type: string
+        mission_ref:
+          type: string
+        workspace_id:
+          type: string
+        key_id:
+          type: string
+          description: The signing key that was valid when the receipt was signed.
+        signed_at:
+          type: integer
+          format: int64
+        receipt_digest:
+          type: string
+          description: sha256 hex of the exact canonical payload bytes.
+        settlement_digest:
+          type: string
+          description: The signed cumulative budget settlement digest.
+        outcome:
+          type: string
+          enum: [success, failure]
+        mission_versions:
+          type: array
+          items:
+            type: integer
+        expansion_decision_refs:
+          type: array
+          items:
+            type: string
+        repository_id:
+          type: integer
+        issue_number:
+          type: integer
+        branch:
+          type: string
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptCheckSummary'
+        started_at:
+          type: integer
+          format: int64
+        finished_at:
+          type: integer
+          format: int64
+        aggregate_cost_micros:
+          type: integer
+          format: int64
+        budget_micros:
+          type: integer
+          format: int64
+        historical_enforcement:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptEnforcementSummary'
+    ReceiptCheckSummary:
+      type: object
+      required: [kind, outcome]
+      properties:
+        kind:
+          type: string
+        outcome:
+          type: string
+    ReceiptEnforcementSummary:
+      type: object
+      required: [scope, level]
+      properties:
+        scope:
+          type: string
+        level:
+          type: string
+    ReceiptPublicationStatus:
+      type: object
+      required: [state, idempotency_key, repository_id, pull_request_number, head_sha, updated_at]
+      properties:
+        state:
+          type: string
+          description: One of in_flight, settled, or disputed.
+          enum: [in_flight, settled, disputed]
+        check_run_id:
+          type: string
+        idempotency_key:
+          type: string
+        repository_id:
+          type: integer
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    RevokeBeginRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: One of the fixed normalized revocation reason codes.
+    RevokeBeginResponse:
+      type: object
+      required: [challenge_id, options]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn assertion options JSON for the decision
+            ceremony, as produced by the server verifier.
+    RevokeFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: Opaque WebAuthn assertion JSON from the credential.
+        cli_revocation_id:
+          type: string
+          description: >
+            Optional CLI revocation request ID. When present, the
+            one-use result code is minted after the revocation settles
+            or becomes pending, and the response is a 302 redirect to
+            the exact loopback callback.
+    RevocationResult:
+      type: object
+      required: [pass_id, mission_ref, revoked, containment, reason_code, revoked_at]
+      properties:
+        pass_id:
+          type: string
+        mission_ref:
+          type: string
+        revoked:
+          type: boolean
+        containment:
+          type: string
+        reason_code:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+    RevokePendingResponse:
+      type: object
+      required: [pass_id, reconciliation]
+      properties:
+        pass_id:
+          type: string
+        reconciliation:
+          type: string
+          description: The reconciliation state, pending while the ambiguous upstream outcome settles.
+    PendingExpansion:
+      type: object
+      required: [expansion_id, expansion_digest, blocked_operation,
+        resource, repository, ref, path, destination,
+        normalized_arguments_digest, quantity, budget_micros,
+        current_authority, requested_authority, consequence_change,
+        reason_code, reversibility, requested_expiry, stale, expired]
+      properties:
+        expansion_id:
+          type: string
+        expansion_digest:
+          type: string
+        blocked_operation:
+          type: string
+        resource:
+          type: string
+        repository:
+          type: string
+        ref:
+          type: string
+        path:
+          type: string
+        destination:
+          type: string
+        normalized_arguments_digest:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+        budget_micros:
+          type: integer
+          format: int64
+        current_authority:
+          type: string
+        requested_authority:
+          type: string
+        consequence_change:
+          type: string
+        reason_code:
+          type: string
+        reversibility:
+          type: string
+          enum: [reversible, irreversible]
+        requested_expiry:
+          type: string
+          format: date-time
+        agent_rationale:
+          type: string
+          description: Agent-authored rationale, displayed labeled as such, never part of the decision digest.
+        stale:
+          type: boolean
+          description: True when the upstream expansion is no longer pending, or the mission version moved.
+        expired:
+          type: boolean
+          description: True when the requested expiry passed.
+    ExpansionListResponse:
+      type: object
+      required: [pass_id, expansions]
+      properties:
+        pass_id:
+          type: string
+        expansions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingExpansion'
+    ExpansionDecideBeginRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve_once, deny]
+          description: The exact decision. approve_once grants the canonical delta once; deny rejects it.
+    ExpansionBeginResponse:
+      type: object
+      required: [challenge_id, options, expansion_id, decision, effective_expiry]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn assertion options JSON for the decision
+            ceremony, as produced by the server verifier.
+        expansion_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
+        effective_expiry:
+          type: string
+          format: date-time
+          description: min(requested expiry, mission expiry) for approve_once.
+    ExpansionDecideFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: >
+            Opaque WebAuthn assertion response JSON from the founder's
+            passkey, as consumed by the server verifier.
+    ExpansionDecisionResult:
+      type: object
+      required: [expansion_id, pass_id, decision, decision_ref]
+      properties:
+        expansion_id:
+          type: string
+        pass_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
+        decision_ref:
+          type: string
+          description: The durable decision reference for the timeline.
+        authscope_mission_version:
+          type: integer
+          format: int64
+          description: The returned upstream mission version for an approval.
+        state:
+          type: string
+          description: The pass state after the decision settles.
+    ExpansionDecidePendingResponse:
+      type: object
+      required: [expansion_id, decision, reconciliation]
+      properties:
+        expansion_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve_once, deny]
+        reconciliation:
+          type: string
+          description: The reconciliation state, pending while the ambiguous upstream outcome settles.
+    CLIRevocationCreateRequest:
+      type: object
+      required: [pass_id, redirect_uri, state, code_challenge, code_challenge_method]
+      properties:
+        pass_id:
+          type: string
+        redirect_uri:
+          type: string
+          description: The exact loopback redirect URI.
+        state:
+          type: string
+          description: The 256-bit handoff state, base64url with no padding.
+        code_challenge:
+          type: string
+          description: The S256 PKCE challenge, base64url with no padding.
+        code_challenge_method:
+          type: string
+          description: Always S256.
+    CLIRevocationCreateResponse:
+      type: object
+      required: [request_id, browser_url, revocation_digest]
+      properties:
+        request_id:
+          type: string
+        browser_url:
+          type: string
+        revocation_digest:
+          type: string
+          description: The revocation digest the browser decision is bound to.
+    CLIRevocationExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          description: The one-use result code, base64url with no padding.
+        code_verifier:
+          type: string
+          description: The S256 PKCE verifier, base64url with no padding.
+        redirect_uri:
+          type: string
+          description: The exact loopback redirect URI registered with the request.
+        state:
+          type: string
+          description: The original 256-bit handoff state, base64url with no padding.
+    CLIRevocationExchangeResponse:
+      type: object
+      required: [result_ref, containment]
+      properties:
+        result_ref:
+          type: string
+          description: The opaque revocation result reference.
+        containment:
+          type: string
+          description: The fixed containment state.

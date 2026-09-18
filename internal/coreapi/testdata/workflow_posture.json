@@ -1,0 +1,7 @@
+{
+  "binding_id": "binding-1",
+  "ref": "main",
+  "workflows_inspected": 2,
+  "findings": [{"path": ".github/workflows/ci.yml", "risk": "secret_access"}],
+  "posture": "risky"
+}
