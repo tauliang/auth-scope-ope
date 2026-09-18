@@ -20,15 +20,24 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql
 var migrationFS embed.FS
 
-// initialMigration is the DDL for the presentation store, kept as a .sql
-// migration file and embedded at compile time.
-func loadInitialMigration() (string, error) {
-	b, err := migrationFS.ReadFile("migrations/001_initial.sql")
+// migrations lists the schema migrations in apply order. Each version is
+// recorded in schema_migrations exactly once.
+var migrations = []struct {
+	version string
+	file    string
+}{
+	{"001_initial", "migrations/001_initial.sql"},
+	{"002_authn", "migrations/002_authn.sql"},
+}
+
+// loadMigration reads one embedded migration file.
+func loadMigration(file string) (string, error) {
+	b, err := migrationFS.ReadFile(file)
 	if err != nil {
-		return "", fmt.Errorf("store: read embedded migration: %w", err)
+		return "", fmt.Errorf("store: read embedded migration %s: %w", file, err)
 	}
 	return string(b), nil
 }
@@ -133,22 +142,24 @@ func runMigrations(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return fmt.Errorf("store: create migrations table: %w", err)
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = '001_initial'`).Scan(&count); err != nil {
-		return fmt.Errorf("store: check migrations: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
-	migration, err := loadInitialMigration()
-	if err != nil {
-		return err
-	}
-	if _, err := db.Exec(migration); err != nil {
-		return fmt.Errorf("store: apply 001_initial: %w", err)
-	}
-	if _, err := db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES ('001_initial', ?)`, formatTime(time.Now())); err != nil {
-		return fmt.Errorf("store: record migration: %w", err)
+	for _, m := range migrations {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, m.version).Scan(&count); err != nil {
+			return fmt.Errorf("store: check migrations: %w", err)
+		}
+		if count > 0 {
+			continue
+		}
+		migration, err := loadMigration(m.file)
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(migration); err != nil {
+			return fmt.Errorf("store: apply %s: %w", m.version, err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, m.version, formatTime(time.Now())); err != nil {
+			return fmt.Errorf("store: record migration: %w", err)
+		}
 	}
 	return nil
 }

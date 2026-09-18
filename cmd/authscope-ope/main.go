@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
@@ -55,7 +56,29 @@ func runServe() error {
 	if err != nil {
 		return err
 	}
-	handler := httpapi.New(httpapi.Dependencies{Config: cfg, Contract: report, Store: st})
+	defer func() {
+		if err := st.Close(); err != nil {
+			log.Printf("close store: %v", err)
+		}
+	}()
+	ctx := context.Background()
+	verifier, err := authn.NewWebAuthnVerifier(cfg.RPID, cfg.Origin)
+	if err != nil {
+		return fmt.Errorf("webauthn verifier: %w", err)
+	}
+	authnSvc, err := authn.NewService(ctx, st, verifier)
+	if err != nil {
+		return fmt.Errorf("authn service: %w", err)
+	}
+	// The bootstrap code is issued and printed only for an unenrolled
+	// instance. EnsureBootstrapCode returns an empty code once a founder
+	// is enrolled, so the secret never appears on the terminal again.
+	if code, err := authnSvc.EnsureBootstrapCode(ctx); err != nil {
+		return fmt.Errorf("bootstrap code: %w", err)
+	} else if code != "" {
+		fmt.Printf("Founder enrollment is open. Enter this one-time code in the browser:\n\n  %s\n\nThe code expires in ten minutes and is never shown again.\n", code)
+	}
+	handler := httpapi.New(httpapi.Dependencies{Config: cfg, Contract: report, Store: st, Authn: authnSvc})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)
 }

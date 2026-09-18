@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/store"
@@ -16,11 +17,14 @@ import (
 const maxBodyBytes = 1 << 20
 
 // Dependencies wires the HTTP server. Later tasks add the AuthScope client
-// and session manager here.
+// here.
 type Dependencies struct {
 	Config   config.Config
 	Contract coreapi.ContractReport
 	Store    store.Store
+	// Authn is the founder authentication service. It may be nil in tests
+	// that only exercise the pre-authentication surface.
+	Authn *authn.Service
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2
@@ -42,6 +46,7 @@ type CompatibilityStatus struct {
 // display labels the UI may render. Nothing else is exposed here.
 type BootstrapResponse struct {
 	Enrolled        bool                `json:"enrolled"`
+	EnrollmentState string              `json:"enrollment_state"`
 	Workspace       *WorkspaceBinding   `json:"workspace,omitempty"`
 	Compatibility   CompatibilityStatus `json:"compatibility"`
 	AuthorityLabels []string            `json:"authority_labels"`
@@ -53,6 +58,7 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz(deps.Contract))
 	mux.HandleFunc("/api/v1/bootstrap", handleBootstrap(deps))
+	authRoutes(mux, deps)
 
 	return withSecurityHeaders(http.MaxBytesHandler(mux, maxBodyBytes))
 }
@@ -94,15 +100,34 @@ func handleBootstrap(deps Dependencies) http.HandlerFunc {
 		if deps.Contract.Ready() {
 			status = "ready"
 		}
-		writeJSON(w, http.StatusOK, BootstrapResponse{
-			Enrolled: false,
+		resp := BootstrapResponse{
+			Enrolled:        false,
+			EnrollmentState: string(authn.EnrollmentNeedsBootstrap),
 			Compatibility: CompatibilityStatus{
 				Status:      status,
 				CoreVersion: deps.Contract.CoreVersion,
 				Problems:    deps.Contract.Problems,
 			},
 			AuthorityLabels: []string{"AuthScope mission authority"},
-		})
+		}
+		if deps.Authn != nil {
+			var bootstrapToken, sessionToken string
+			if c, err := r.Cookie(deps.Authn.BootstrapCookieName()); err == nil {
+				bootstrapToken = c.Value
+			}
+			if c, err := r.Cookie(deps.Authn.SessionCookieName()); err == nil {
+				sessionToken = c.Value
+			}
+			if st, err := deps.Authn.EnrollmentStatus(r.Context(), bootstrapToken, sessionToken); err == nil {
+				resp.Enrolled = st.Enrolled
+				resp.EnrollmentState = string(st.State)
+				resp.Workspace = &WorkspaceBinding{
+					WorkspaceID: st.WorkspaceID,
+					Hostname:    st.Hostname,
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -112,6 +137,10 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
+		// The API serves JSON only: deny every content source and
+		// framing, and disable powerful browser features.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), hid=(), serial=(), bluetooth=(), publickey-credentials-get=(), publickey-credentials-create=()")
 		next.ServeHTTP(w, r)
 	})
 }

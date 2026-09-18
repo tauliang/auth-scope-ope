@@ -58,6 +58,238 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/bootstrap/begin:
+    post:
+      operationId: authBootstrapBegin
+      summary: Open a founder enrollment ceremony
+      description: >
+        Verifies the terminal bootstrap code and opens a short-lived
+        enrollment ceremony, returned as a bootstrap ceremony cookie. An
+        already-authenticated client is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapBeginRequest'
+      responses:
+        '200':
+          description: Enrollment ceremony opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: Invalid bootstrap code.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Already authenticated or already enrolled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/register/begin:
+    post:
+      operationId: authBootstrapRegisterBegin
+      summary: Begin a bootstrap passkey registration
+      description: >
+        Issues WebAuthn creation options for the first passkey, or for the
+        second passkey when the recovery method is a passkey.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRegisterBeginRequest'
+      responses:
+        '200':
+          description: Registration ceremony issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeremonyBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/register/finish:
+    post:
+      operationId: authBootstrapRegisterFinish
+      summary: Finish a bootstrap passkey registration
+      description: >
+        Verifies the attestation response. The raw response is opaque to the
+        API: it is passed through to the WebAuthn verifier and never stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CeremonyFinishRequest'
+      responses:
+        '200':
+          description: Passkey registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapRegisterFinishResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Credential already registered or ceremony reused.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/bootstrap/recovery/begin:
+    post:
+      operationId: authBootstrapRecoveryBegin
+      summary: Begin the independent recovery method
+      description: >
+        Starts the second passkey registration or issues the one-time
+        offline recovery key, shown exactly once. Requires the first passkey
+        to be registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRecoveryBeginRequest'
+      responses:
+        '200':
+          description: Recovery method started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapRecoveryBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/bootstrap/complete:
+    post:
+      operationId: authBootstrapComplete
+      summary: Complete founder enrollment
+      description: >
+        Confirms the independent recovery method, consumes the bootstrap
+        code, and creates the first founder session. Sets the session cookie
+        and clears the bootstrap ceremony cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapCompleteRequest'
+      responses:
+        '200':
+          description: Enrollment complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: No bootstrap ceremony.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/login/begin:
+    post:
+      operationId: authLoginBegin
+      summary: Begin a founder passkey login
+      description: Issues WebAuthn request options for the enrolled founder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty JSON object.
+      responses:
+        '200':
+          description: Login ceremony issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CeremonyBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: No founder enrolled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/auth/login/finish:
+    post:
+      operationId: authLoginFinish
+      summary: Finish a founder passkey login
+      description: >
+        Verifies the assertion and rotates the founder session, setting a
+        fresh session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CeremonyFinishRequest'
+      responses:
+        '200':
+          description: Login complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -103,10 +335,13 @@ components:
             type: string
     BootstrapResponse:
       type: object
-      required: [enrolled, compatibility, authority_labels]
+      required: [enrolled, enrollment_state, compatibility, authority_labels]
       properties:
         enrolled:
           type: boolean
+        enrollment_state:
+          type: string
+          enum: [needs_bootstrap, needs_recovery_method, locked, authenticated]
         workspace:
           $ref: '#/components/schemas/WorkspaceBinding'
         compatibility:
@@ -115,6 +350,104 @@ components:
           type: array
           items:
             type: string
+    BootstrapBeginRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: The one-time code printed on the server terminal.
+    BootstrapBeginResponse:
+      type: object
+      required: [expires_at]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+    BootstrapRegisterBeginRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+    CeremonyBeginResponse:
+      type: object
+      required: [ceremony_id, options]
+      properties:
+        ceremony_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn ceremony options JSON (creation or request
+            options as produced by the server verifier).
+    CeremonyFinishRequest:
+      type: object
+      required: [ceremony_id, response]
+      properties:
+        ceremony_id:
+          type: string
+        response:
+          description: >
+            Opaque WebAuthn response JSON from navigator.credentials. It is
+            verified and never stored.
+    BootstrapRegisterFinishResponse:
+      type: object
+      required: [credential_id]
+      properties:
+        credential_id:
+          type: string
+    BootstrapRecoveryBeginRequest:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [passkey, offline_key]
+    BootstrapRecoveryBeginResponse:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [passkey, offline_key]
+        ceremony_id:
+          type: string
+        options:
+          description: WebAuthn creation options for the recovery passkey.
+        recovery_key:
+          type: string
+          description: >
+            The one-time offline recovery key, returned exactly once. The
+            server stores only its hash.
+    BootstrapCompleteRequest:
+      type: object
+      properties:
+        recovery_confirmation:
+          type: string
+          description: >
+            The offline recovery key, proving possession before enrollment
+            completes. Omitted when the recovery method is a second passkey.
+    SessionResponse:
+      type: object
+      required: [csrf_token]
+      properties:
+        csrf_token:
+          type: string
+          description: >
+            The session-bound CSRF token. The UI keeps it in memory and
+            sends it as the X-CSRF-Token header; it is never stored in
+            browser storage.
+    ProblemResponse:
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
     ErrorResponse:
       type: object
       required: [error]
