@@ -229,14 +229,14 @@ func runServe() error {
 	handler := httpapi.New(httpapi.Dependencies{
 		Config: cfg, Contract: report, Store: st, Authn: authnSvc,
 		Gate: gate, Authority: gated,
-		Attestor: attestor,
-		CLIAuth:  cliAuth,
-		Launch:   launchSvc,
-		Revocation: revocationSvc,
+		Attestor:      attestor,
+		CLIAuth:       cliAuth,
+		Launch:        launchSvc,
+		Revocation:    revocationSvc,
 		CLIRevocation: cliRevocationSvc,
-		Projector:  projector,
-		Expansion:  expansionSvc,
-		Receipt:    receiptSvc,
+		Projector:     projector,
+		Expansion:     expansionSvc,
+		Receipt:       receiptSvc,
 	})
 	srv := &http.Server{Addr: cfg.BindAddr, Handler: handler}
 	// A server start failure (for example, the port is taken) returns

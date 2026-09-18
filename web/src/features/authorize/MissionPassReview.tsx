@@ -349,15 +349,19 @@ type AuthorizeState =
 // authorized issue and hands it to the review. A 202 answer means the
 // upstream outcome stayed ambiguous: the pending draft is shown with a
 // way to check again, and retrying the creation reuses the same
-// idempotency key so it resolves to the same pass.
+// idempotency key so it resolves to the same pass. onApproved fires once
+// when the review reaches the approved state so the caller can offer the
+// Mission step.
 export function MissionPassAuthorize({
   connectionId,
   issueNumber,
   onBack,
+  onApproved,
 }: {
   connectionId: string;
   issueNumber: number;
   onBack: () => void;
+  onApproved?: (passId: string) => void;
 }) {
   const [state, setState] = useState<AuthorizeState>({ kind: 'creating' });
   const idempotencyKey = useRef<string | null>(null);
@@ -388,6 +392,13 @@ export function MissionPassAuthorize({
   useEffect(() => {
     void create();
   }, [create]);
+
+  // Report approval once so the caller can offer the Mission step.
+  const approvedPassId =
+    state.kind === 'review' && state.review.state === 'approved' ? state.review.pass_id : null;
+  useEffect(() => {
+    if (approvedPassId && onApproved) onApproved(approvedPassId);
+  }, [approvedPassId, onApproved]);
 
   return (
     <section aria-label="Authorize">

@@ -234,10 +234,10 @@ func postRevocationRegister(ctx context.Context, client *http.Client, apiBase, p
 // verifier for the opaque result reference and containment.
 func exchangeRevocationResult(ctx context.Context, client *http.Client, apiBase, code, verifier, redirectURI, state string) (*RevocationOutcome, error) {
 	body, err := json.Marshal(map[string]string{
-		"code":           code,
-		"code_verifier":  verifier,
-		"redirect_uri":   redirectURI,
-		"state":          state,
+		"code":          code,
+		"code_verifier": verifier,
+		"redirect_uri":  redirectURI,
+		"state":         state,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cli: encode revocation exchange: %w", err)

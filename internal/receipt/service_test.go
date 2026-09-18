@@ -26,18 +26,18 @@ type fakeReceiptAuthority struct {
 	coreapi.Authority
 	// mu guards the counters and maps: the concurrency test drives
 	// the fake from multiple goroutines.
-	mu             sync.Mutex
-	receipt        *coreapi.SignedReceiptEnvelope
-	receipts       map[string]*coreapi.SignedReceiptEnvelope
-	receiptErr     error
-	receiptCalls   int
-	history        coreapi.SigningKeyHistory
-	publishCalls   int
-	publishErr     error
-	published      []coreapi.GitHubCheckRequest
-	checks         map[string]coreapi.GitHubCheckResult
+	mu              sync.Mutex
+	receipt         *coreapi.SignedReceiptEnvelope
+	receipts        map[string]*coreapi.SignedReceiptEnvelope
+	receiptErr      error
+	receiptCalls    int
+	history         coreapi.SigningKeyHistory
+	publishCalls    int
+	publishErr      error
+	published       []coreapi.GitHubCheckRequest
+	checks          map[string]coreapi.GitHubCheckResult
 	reconcileStatus string
-	reconcileCalls int
+	reconcileCalls  int
 }
 
 func (f *fakeReceiptAuthority) GetReceipt(ctx context.Context, grantID string, opts coreapi.RequestOptions) (coreapi.SignedReceiptEnvelope, error) {

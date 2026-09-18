@@ -12,6 +12,21 @@ const pendingStorageKey = 'ope.github.pendingHandoff';
 // It carries only server-verified identity metadata, never secrets.
 const connectionStorageKey = 'ope.github.connection';
 
+// readStoredConnection returns the server-verified repository connection
+// stored for this tab, or null when none was stored. Only identity and
+// status metadata ever passes through here; no secret material.
+export function readStoredConnection(): Connection | null {
+  try {
+    const raw = sessionStorage.getItem(connectionStorageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Connection;
+    if (parsed && typeof parsed.connection_id === 'string') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export const githubCompletionPath = '/connect/github/done';
 
 type PendingHandoff = {

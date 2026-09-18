@@ -425,9 +425,9 @@ func newExpansionFixture(t *testing.T, mutate func(fx *expansionFixture)) *expan
 			Status:      "pending",
 			RequestedAt: fixtureClock.Unix(),
 		}},
-		deltas:        map[string]json.RawMessage{fixtureExpansion: deltaJSON},
-		identityKeys:  map[string]ed25519.PublicKey{identityDigest: pub},
-		seenNonces:    map[string]bool{},
+		deltas:       map[string]json.RawMessage{fixtureExpansion: deltaJSON},
+		identityKeys: map[string]ed25519.PublicKey{identityDigest: pub},
+		seenNonces:   map[string]bool{},
 		expected: ExpansionBinding{
 			WorkspaceID:              fixtureWorkspace,
 			PassID:                   fixturePass,

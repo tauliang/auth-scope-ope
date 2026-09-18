@@ -54,8 +54,8 @@ func (f *fakeRevokeServer) handler() http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"request_id":       "req-1",
-				"browser_url":      "https://ope.example.com/mission/pass-1?cli_revocation=req-1",
+				"request_id":        "req-1",
+				"browser_url":       "https://ope.example.com/mission/pass-1?cli_revocation=req-1",
 				"revocation_digest": "sha256:" + strings.Repeat("e", 64),
 			})
 		case r.URL.Path == "/api/v1/cli/revocations/token" && r.Method == http.MethodPost:

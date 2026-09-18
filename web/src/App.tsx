@@ -1,96 +1,45 @@
 import { useEffect, useState } from 'react';
-import { fetchBootstrap, ApiError, setCsrfToken as setClientCsrfToken } from './shared/api/client';
-import type { BootstrapResponse, GitHubConnection, GitHubIssueSnapshot } from './shared/api/generated';
+import { fetchBootstrap, ApiError } from './shared/api/client';
+import type { BootstrapResponse } from './shared/api/generated';
 import PasskeySetup, { type SetupInitialPhase } from './auth/PasskeySetup';
-import {
-  GitHubConnectionComplete,
-  GitHubConnectionStart,
-  githubCompletionPath,
-} from './features/connect/GitHubConnection';
-import IssuePicker from './features/authorize/IssuePicker';
-import { MissionPassAuthorize } from './features/authorize/MissionPassReview';
-import { CLIAuthorization, cliAuthorizationIdFromPath } from './features/authorize/CLIAuthorization';
+import { ConnectPage } from './features/connect/ConnectPage';
+import { AuthorizePage } from './features/authorize/AuthorizePage';
 import {
   MissionPage,
   cliRevocationIdFromSearch,
-  missionPassIdFromPath,
+  missionPassIdFromLocation,
 } from './features/mission/MissionPage';
+import { ProblemPanel } from './shared/components/ProblemPanel';
+
+// Screen is the three-screen OPE journey: Connect, Authorize, Mission.
+// Every navigable path resolves to exactly one of these three screens.
+export type Screen = 'connect' | 'authorize' | 'mission';
+
+// routeForPath maps a pathname to its screen. The GitHub installation
+// completion path (/connect/github/done) belongs to the Connect screen;
+// the transient CLI authorization path (/authorize/cli/<id>) belongs to
+// the Authorize screen; the mission pass path (/mission/<id>) belongs to
+// the Mission screen. Unknown paths fall back to Connect.
+export function routeForPath(pathname: string): Screen {
+  if (pathname === '/authorize' || pathname.startsWith('/authorize/')) {
+    return 'authorize';
+  }
+  if (pathname === '/mission' || pathname.startsWith('/mission/')) {
+    return 'mission';
+  }
+  return 'connect';
+}
 
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; bootstrap: BootstrapResponse };
 
-// AuthenticatedApp renders the product once the founder holds a live
-// session. The CSRF token is published to the API client in memory so
-// state-changing requests attach it as X-CSRF-Token; it is never written
-// to browser storage.
-function AuthenticatedApp({ bootstrap, csrfToken }: { bootstrap: BootstrapResponse; csrfToken: string }) {
-  const [connection, setConnection] = useState<GitHubConnection | null>(null);
-  const [authorized, setAuthorized] = useState<GitHubIssueSnapshot | null>(null);
-
-  useEffect(() => {
-    setClientCsrfToken(csrfToken);
-    return () => setClientCsrfToken(null);
-  }, [csrfToken]);
-
-  return (
-    <main>
-      <h1>AuthScope OPE</h1>
-      <section aria-label="enrollment">
-        <h2>Enrollment</h2>
-        <p>Founder enrolled.</p>
-      </section>
-      <section aria-label="workspace">
-        <h2>Workspace</h2>
-        {bootstrap.workspace ? (
-          <dl>
-            <dt>Workspace ID</dt>
-            <dd>{bootstrap.workspace.workspace_id}</dd>
-            <dt>Hostname</dt>
-            <dd>{bootstrap.workspace.hostname}</dd>
-          </dl>
-        ) : (
-          <p>No workspace bound yet.</p>
-        )}
-      </section>
-      <section aria-label="compatibility">
-        <h2>Authority compatibility</h2>
-        <p>
-          {bootstrap.compatibility.status === 'ready' ? 'Compatible' : 'Not compatible'} with core{' '}
-          {bootstrap.compatibility.core_version}.
-        </p>
-        {bootstrap.compatibility.problems?.map((problem) => (
-          <p key={problem} role="alert">
-            {problem}
-          </p>
-        ))}
-      </section>
-      <section aria-label="authority">
-        <h2>Authority</h2>
-        <ul>
-          {bootstrap.authority_labels.map((label) => (
-            <li key={label}>{label}</li>
-          ))}
-        </ul>
-      </section>
-      <GitHubConnectionStart onConnected={setConnection} />
-      <IssuePicker connection={connection} onAuthorize={setAuthorized} />
-      {authorized && connection && (
-        <MissionPassAuthorize
-          connectionId={connection.connection_id}
-          issueNumber={authorized.issue_number}
-          onBack={() => setAuthorized(null)}
-        />
-      )}
-    </main>
-  );
-}
-
-// App is the product shell. It loads the first-paint bootstrap state and
-// routes to founder enrollment, passkey unlock, or the authenticated
-// product. The session CSRF token is held in memory for the lifetime of
-// the page and never written to browser storage.
+// App is the product shell. It loads the first-paint bootstrap state,
+// gates on founder enrollment and passkey unlock, then renders exactly
+// one of the three journey screens. The session CSRF token is held in
+// memory for the lifetime of the page and never written to browser
+// storage.
 export default function App() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
@@ -124,12 +73,21 @@ export default function App() {
       });
   }
 
-  if (state.kind === 'loading') return <main><h1>AuthScope OPE</h1><p>Connecting…</p></main>;
+  if (state.kind === 'loading')
+    return (
+      <main>
+        <h1>AuthScope OPE</h1>
+        <p>Connecting…</p>
+      </main>
+    );
   if (state.kind === 'error')
     return (
       <main>
         <h1>AuthScope OPE</h1>
-        <p role="alert">Could not reach the local service ({state.message}).</p>
+        <ProblemPanel
+          title="Could not reach the local service."
+          detail={`The service reported ${state.message}. Check that the local service is running, then try once.`}
+        />
       </main>
     );
 
@@ -157,47 +115,32 @@ export default function App() {
     />
   );
 
-  // The AuthScope installation redirect lands here. It needs the same
-  // authenticated session plus the in-memory CSRF token to finish the
-  // handoff; without them the login flow below runs first and returns
-  // here afterwards.
-  const onCompletionPath =
-    typeof window !== 'undefined' && window.location.pathname === githubCompletionPath;
-  if (onCompletionPath && bootstrap.enrollment_state === 'authenticated' && csrfToken) {
-    return (
-      <GitHubConnectionComplete
-        csrfToken={csrfToken}
-        workspaceId={bootstrap.workspace?.workspace_id ?? 'unknown'}
-        hostname={bootstrap.workspace?.hostname ?? 'unknown'}
-        onAuthenticated={refreshAfterAuth}
-        onConnected={() => {}}
-      />
-    );
-  }
-
   // An authenticated bootstrap plus a remembered CSRF token means this
   // page holds a live founder session.
   if (bootstrap.enrollment_state === 'authenticated' && csrfToken) {
-    // The CLI one-use browser handoff lands here. The authorization id is
-    // transient: it lives only in the path, never in browser storage, and
-    // the page shows only the pinned launch bindings, then "Return to the
-    // CLI." after finish.
-    const cliAuthorizationId =
-      typeof window !== 'undefined' ? cliAuthorizationIdFromPath(window.location.pathname) : null;
-    if (cliAuthorizationId) {
-      return <CLIAuthorization authorizationId={cliAuthorizationId} />;
+    const screen = routeForPath(window.location.pathname);
+    if (screen === 'connect') {
+      return (
+        <ConnectPage bootstrap={bootstrap} csrfToken={csrfToken} onAuthenticated={refreshAfterAuth} />
+      );
     }
-    // The mission route shows a pass timeline and the founder's revoke
-    // control, or the CLI revocation decision when the CLI opened the
-    // result-only handoff (?cli_revocation=).
-    const missionPassId =
-      typeof window !== 'undefined' ? missionPassIdFromPath(window.location.pathname) : null;
-    if (missionPassId) {
-      const cliRevocationId =
-        typeof window !== 'undefined' ? cliRevocationIdFromSearch(window.location.search) : null;
-      return <MissionPage passId={missionPassId} cliRevocationId={cliRevocationId} />;
+    if (screen === 'authorize') {
+      return <AuthorizePage />;
     }
-    return <AuthenticatedApp bootstrap={bootstrap} csrfToken={csrfToken} />;
+    const passId = missionPassIdFromLocation(window.location.pathname, window.location.search);
+    if (passId) {
+      const cliRevocationId = cliRevocationIdFromSearch(window.location.search);
+      return <MissionPage passId={passId} cliRevocationId={cliRevocationId} />;
+    }
+    return (
+      <main>
+        <h1>AuthScope OPE</h1>
+        <ProblemPanel
+          title="No mission pass selected."
+          detail="The mission screen needs a pass id. Go back to the Authorize screen and approve a proposal first."
+        />
+      </main>
+    );
   }
 
   const phase = setupPhase();

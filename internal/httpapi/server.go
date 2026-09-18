@@ -99,9 +99,9 @@ type BootstrapResponse struct {
 // New builds the HTTP handler for the local OPE API.
 func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz(deps.Contract, deps.Gate))
-	mux.HandleFunc("/api/v1/bootstrap", handleBootstrap(deps))
+	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /readyz", handleReadyz(deps.Contract, deps.Gate))
+	mux.HandleFunc("GET /api/v1/bootstrap", handleBootstrap(deps))
 	authRoutes(mux, deps)
 	gh := newGitHubServices(deps)
 	githubRoutes(mux, deps, gh)

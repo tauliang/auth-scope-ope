@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App from './App';
+import App, { routeForPath } from './App';
 import type { BootstrapResponse } from './shared/api/generated';
 
 vi.mock('./shared/webauthn', () => ({
@@ -158,9 +158,13 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: /authenticate with passkey/i }));
     expect(await screen.findByText('Founder enrolled.')).toBeInTheDocument();
 
-    // The GitHub connect form and issue picker are part of the product.
+    // The GitHub connect form is on the connect screen; the issue
+    // selection entry links to the authorize screen.
     expect(screen.getByRole('heading', { name: /github connection/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /pick an issue/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /select an issue/i })).toHaveAttribute(
+      'href',
+      '/authorize',
+    );
 
     await user.type(screen.getByLabelText(/repository \(owner\/name\)/i), 'octo-org/my-repo');
     await user.click(screen.getByRole('button', { name: /connect repository/i }));
@@ -302,5 +306,30 @@ describe('App', () => {
     });
     render(<App />);
     expect(await screen.findByRole('button', { name: /authenticate with passkey/i })).toBeInTheDocument();
+  });
+});
+
+describe('routeForPath', () => {
+  it('maps every known path to exactly one of the three screens', () => {
+    expect(routeForPath('/')).toBe('connect');
+    expect(routeForPath('/connect/github/done')).toBe('connect');
+    expect(routeForPath('/authorize')).toBe('authorize');
+    expect(routeForPath('/authorize/cli/abc123')).toBe('authorize');
+    expect(routeForPath('/mission')).toBe('mission');
+    expect(routeForPath('/mission/pass-1')).toBe('mission');
+  });
+
+  it('falls back to connect for unknown paths', () => {
+    expect(routeForPath('/nope')).toBe('connect');
+    expect(routeForPath('/api/v1/foo')).toBe('connect');
+  });
+
+  it('exposes exactly three screens', () => {
+    const screens = new Set([
+      routeForPath('/'),
+      routeForPath('/authorize'),
+      routeForPath('/mission/pass-1'),
+    ]);
+    expect([...screens].sort()).toEqual(['authorize', 'connect', 'mission']);
   });
 });
