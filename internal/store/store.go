@@ -45,9 +45,16 @@ type Store interface {
 	GetInstance(context.Context) (InstanceRecord, error)
 	// GetMissionPass returns one workspace-qualified mission pass.
 	GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error)
+	// ListMissionPasses returns every mission pass of a workspace, oldest
+	// first. The reconciliation worker uses it to resume each nonterminal
+	// mission from its durable cursor.
+	ListMissionPasses(ctx context.Context, workspaceID string) ([]MissionPassRecord, error)
 	// ListMissionEvents returns up to limit events for a pass, ordered by
 	// cursor, strictly after afterCursor (empty means from the start).
 	ListMissionEvents(ctx context.Context, workspaceID, passID, afterCursor string, limit int) ([]MissionEventRecord, error)
+	// GetMissionProjection returns the durable event-projection state of a
+	// pass, or ErrNotFound when no event was ever projected.
+	GetMissionProjection(ctx context.Context, workspaceID, passID string) (MissionProjection, error)
 	// CountFounders returns the number of enrolled founders in a workspace.
 	CountFounders(ctx context.Context, workspaceID string) (int, error)
 	// ListFounders returns every enrolled founder in a workspace.
@@ -117,6 +124,22 @@ type Store interface {
 	// uses it to resolve an authorization code without ever storing the
 	// code itself.
 	GetCLIAuthorizationByCodeHash(ctx context.Context, workspaceID string, codeHash [32]byte) (CLIAuthorization, error)
+	// GetCLIRevocation returns one workspace-qualified CLI revocation
+	// request, or ErrNotFound.
+	GetCLIRevocation(ctx context.Context, workspaceID, requestID string) (CLIRevocation, error)
+	// GetCLIRevocationByState returns the pending revocation request opened
+	// with the given pass and state, or ErrNotFound. Create uses it for
+	// idempotent replay: the same canonical request replays, changed
+	// content conflicts.
+	GetCLIRevocationByState(ctx context.Context, workspaceID, passID, state string) (CLIRevocation, error)
+	// GetCLIRevocationByCodeHash returns the revocation request holding
+	// the given result code hash, or ErrNotFound. The token exchange uses
+	// it to resolve a result code without ever storing the code itself.
+	GetCLIRevocationByCodeHash(ctx context.Context, workspaceID string, codeHash [32]byte) (CLIRevocation, error)
+	// ListRevocationIntents returns the revocation intents of a workspace
+	// in the given state, oldest first. The reconciliation worker uses it
+	// to resume ambiguous revocations without re-issuing them.
+	ListRevocationIntents(ctx context.Context, workspaceID, state string) ([]RevocationIntentRecord, error)
 }
 
 // Tx is the write side of the presentation store. Every method is
@@ -171,6 +194,13 @@ type Tx interface {
 	// GetMissionPass returns one workspace-qualified mission pass inside
 	// the transaction, or ErrNotFound.
 	GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error)
+	// GetMissionProjection returns the durable event-projection state of a
+	// pass inside the transaction, or ErrNotFound when no event was ever
+	// projected.
+	GetMissionProjection(ctx context.Context, workspaceID, passID string) (MissionProjection, error)
+	// ListMissionEvents returns up to limit events for a pass inside the
+	// transaction, ordered by cursor, strictly after afterCursor.
+	ListMissionEvents(ctx context.Context, workspaceID, passID, afterCursor string, limit int) ([]MissionEventRecord, error)
 	// BeginIdempotency starts or replays an idempotent operation. A new key
 	// returns Replay=false; a known key with the same canonical digest
 	// returns Replay=true with the stored result when completed; a known key
@@ -240,6 +270,62 @@ type Tx interface {
 	// failed exactly once, recording the run id and envelope digest on
 	// success. A second settle returns ErrConflict.
 	SettleLaunchExchangeIntent(ctx context.Context, workspaceID, codeHash, status, runID, envelopeDigest, failure string, now time.Time) error
+	// AdvanceProjection records projection progress after a page: the
+	// authority page cursor moves forward only, the local event sequence
+	// and projected mission version move upward only, and the projection
+	// stays marked compatible. It upserts the projection row.
+	AdvanceProjection(ctx context.Context, workspaceID, passID, pageCursor string, eventSeq, missionVersion int64) error
+	// AdvanceProjectionCursor moves the authority page cursor forward
+	// without storing an event, for pages that carry no new events.
+	AdvanceProjectionCursor(ctx context.Context, workspaceID, passID, pageCursor string) error
+	// MarkProjectionIncompatible discards forward progress for an unknown
+	// authenticated event type: the payload is never stored, the cursor
+	// stays unchanged, and the projection is marked incompatible and
+	// stale with the fixed local reason. Business mutations fail closed
+	// until a parser and pinned-contract upgrade replays from the
+	// unchanged cursor.
+	MarkProjectionIncompatible(ctx context.Context, workspaceID, passID, reason string) error
+	// MarkProjectionCompatible clears the incompatibility gate after a
+	// parser and pinned-contract upgrade, so replay from the unchanged
+	// cursor can resume.
+	MarkProjectionCompatible(ctx context.Context, workspaceID, passID string) error
+	// AcquireWorkerLease takes the instance worker lease for owner when
+	// no live lease exists. It returns false when another live owner
+	// holds the lease.
+	AcquireWorkerLease(ctx context.Context, instanceID, owner string, ttl time.Duration) (bool, error)
+	// HeartbeatWorkerLease renews the lease the owner holds. It returns
+	// false when the owner no longer holds the lease.
+	HeartbeatWorkerLease(ctx context.Context, instanceID, owner string, ttl time.Duration) (bool, error)
+	// ReleaseWorkerLease drops the lease the owner holds. It is a no-op
+	// when the owner does not hold it.
+	ReleaseWorkerLease(ctx context.Context, instanceID, owner string) error
+	// PutRevocationIntent upserts the durable local intent for one
+	// revocation idempotency key. It is written before the upstream
+	// RevokeMission call so an ambiguous outcome reconciles by the same
+	// key. Completed intents are never rewritten.
+	PutRevocationIntent(ctx context.Context, rec RevocationIntentRecord) error
+	// GetRevocationIntent returns the durable revocation intent for a
+	// pass, or ErrNotFound.
+	GetRevocationIntent(ctx context.Context, workspaceID, passID string) (RevocationIntentRecord, error)
+	// CompleteRevocationIntent marks the revocation intent completed with
+	// the containment state and the upstream revocation reference.
+	CompleteRevocationIntent(ctx context.Context, workspaceID, passID, containment, upstreamRef string) error
+	// PutCLIRevocation inserts one pending CLI revocation request. A
+	// duplicate request ID returns ErrConflict. Only hashes of secret
+	// values are stored: the raw result code and verifier never reach the
+	// store.
+	PutCLIRevocation(ctx context.Context, rec CLIRevocation) error
+	// MintCLIRevocationResult records the one-use result code hash, the
+	// opaque result reference, and the fixed containment state for a
+	// revocation request whose upstream result settled or became pending
+	// reconciliation. It affects exactly one unminted row; an unknown ID
+	// or an already-minted request returns ErrConflict.
+	MintCLIRevocationResult(ctx context.Context, workspaceID, requestID, resultRef, containment string, codeHash [32]byte, now time.Time) error
+	// ConsumeCLIRevocationResult atomically marks a minted result consumed
+	// and returns its opaque reference. An identical retry after a lost
+	// response returns only the original reference; it never mints a
+	// second result.
+	ConsumeCLIRevocationResult(ctx context.Context, workspaceID string, codeHash [32]byte, now time.Time) (string, string, error)
 }
 
 // LaunchExchangeIntent is the durable reservation for one authorization
@@ -331,6 +417,11 @@ type MissionPassRecord struct {
 	// RunID stays empty on approval: approval creates only the mission, and
 	// a launch run is created later.
 	RunID     string
+	// Containment is the last known upstream revocation containment:
+	// "acknowledged", "pending", or "partial". Empty until the first
+	// revocation. A pending containment is reconciled by the
+	// server-owned worker.
+	Containment string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -362,6 +453,96 @@ type ApprovalIntentRecord struct {
 	AttestationJSON string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// MissionProjection is the durable event-projection state of one pass:
+// the cursor the reconciliation worker resumes from, and the
+// compatibility gate. An unknown authenticated event type marks the
+// projection incompatible and stale with a fixed local reason, leaves the
+// cursor unchanged, and blocks business mutations until a parser and
+// pinned-contract upgrade replays from that cursor.
+type MissionProjection struct {
+	WorkspaceID           string
+	PassID                string
+	Cursor                string
+	EventSeq              int64
+	MissionVersion        int64
+	Compatible            bool
+	Stale                 bool
+	IncompatibilityReason string
+	UpdatedAt             time.Time
+}
+
+// IncompatibleProjectionReason is the fixed local reason recorded when an
+// unknown authenticated event type arrives. It names no payload content.
+const IncompatibleProjectionReason = "unknown event type: parser and pinned contract upgrade required"
+
+// RevocationIntentState values for RevocationIntentRecord.
+const (
+	// RevocationIntentInFlight means a revocation upstream call is in
+	// progress or its outcome is unknown; reconciliation may settle it.
+	RevocationIntentInFlight = "in_flight"
+	// RevocationIntentCompleted means the revocation settled and the pass
+	// was persisted with its containment state.
+	RevocationIntentCompleted = "completed"
+)
+
+// Revocation containment states recorded on the pass and the intent.
+const (
+	// ContainmentAcknowledged means the upstream acknowledged gateway
+	// containment for the revocation.
+	ContainmentAcknowledged = "acknowledged"
+	// ContainmentPending means the revocation outcome is ambiguous; the
+	// worker reconciles it by the original idempotency key.
+	ContainmentPending = "pending"
+	// ContainmentPartial means the upstream recorded the revocation but
+	// did not acknowledge full gateway containment.
+	ContainmentPartial = "partial"
+)
+
+// RevocationIntentRecord is the durable local intent behind one
+// revocation idempotency key. It is written before the upstream
+// RevokeMission call so an ambiguous upstream outcome (timeout, dropped
+// response, crash) reconciles later without ever re-issuing the
+// revocation.
+type RevocationIntentRecord struct {
+	WorkspaceID       string
+	PassID            string
+	IdempotencyKey    string
+	ReasonCode        string
+	CanonicalDigest   string // hex SHA-256 of the canonical revocation bytes
+	State             string
+	Containment       string
+	AttestationDigest string
+	// AttestationJSON is the original signed decision attestation, so an
+	// idempotent replay carries the exact original call.
+	AttestationJSON string
+	UpstreamRef     string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// CLIRevocation is the durable record for a result-only loopback PKCE
+// revocation handoff. Only hashes of secret values are stored: the
+// SHA-256 of the one-use result code, never the raw code or verifier.
+// The token exchange returns only the opaque result reference plus the
+// fixed containment state; no CLI credential or session is issued or
+// stored.
+type CLIRevocation struct {
+	WorkspaceID        string
+	RequestID          string
+	PassID             string
+	State              string // original state, for the loopback redirect
+	CodeChallenge      string // S256 only
+	RedirectURI        string // exact loopback callback
+	CanonicalDigest    string // hex SHA-256 of the server-canonical revocation binding
+	ReasonCode         string // unused: the founder picks the reason in the browser
+	ResultRef          string // opaque revocation-result reference
+	ResultContainment  string // fixed containment state for the result
+	CodeHash           [32]byte
+	ResultConsumedAt   *time.Time
+	ExpiresAt          time.Time
+	CreatedAt          time.Time
 }
 
 // MissionEventRecord is one projected, allowlisted event for a pass.

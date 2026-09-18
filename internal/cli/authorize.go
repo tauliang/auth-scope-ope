@@ -324,7 +324,14 @@ func ReceiveAuthorizationCode(ctx context.Context, ln net.Listener, expectedStat
 
 	select {
 	case code := <-codeCh:
-		_ = srv.Close()
+		// Graceful shutdown, not Close: the confirmation response was
+		// flushed before the code was signalled, and Close can tear the
+		// connection down before the client reads the body. Shutdown
+		// still closes the listener at once, so a duplicate callback
+		// after the single success has nowhere to go.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = srv.Shutdown(shutdownCtx)
+		cancel()
 		<-serveErr
 		return code, nil
 	case err := <-serveErr:

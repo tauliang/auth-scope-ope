@@ -100,7 +100,7 @@ const (
 // without a verified receipt.
 var passTransitions = map[PassState]map[PassState]bool{
 	PassDraft: {
-		PassApproved: true, PassRevoked: true, PassExpired: true,
+		PassApproved: true, PassExpired: true,
 	},
 	PassApproved: {
 		PassLaunching: true, PassRevoked: true, PassExpired: true,
@@ -113,11 +113,29 @@ var passTransitions = map[PassState]map[PassState]bool{
 		PassRevoked: true, PassExpired: true,
 	},
 	PassAwaitingExpansion: {
-		PassRunning: true, PassRevoked: true, PassExpired: true,
+		PassRunning: true, PassOutcomePending: true, PassRevoked: true, PassExpired: true,
 	},
 	PassOutcomePending: {
 		PassCompleted: true, PassFailed: true, PassRevoked: true,
 	},
+}
+
+// revocableStates are exactly the pass states from which a mission may
+// be revoked. Revocation is not available from draft, terminal states,
+// or expired.
+var revocableStates = map[PassState]bool{
+	PassApproved:          true,
+	PassLaunching:         true,
+	PassRunning:           true,
+	PassAwaitingExpansion: true,
+	PassOutcomePending:    true,
+}
+
+// Revocable reports whether a mission pass in the given state may be
+// revoked. Exactly approved, launching, running, awaiting_expansion,
+// and outcome_pending are revocable.
+func Revocable(state PassState) bool {
+	return revocableStates[state]
 }
 
 var knownPassStates = map[PassState]bool{

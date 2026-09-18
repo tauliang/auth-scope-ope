@@ -129,8 +129,14 @@ type DecisionPurpose string
 const (
 	// DecisionPassApproval approves an AuthScope proposal for a pass.
 	DecisionPassApproval DecisionPurpose = "pass_approval"
-	// DecisionPassRevocation revokes an approved mission.
+	// DecisionPassRevocation was the historical pass revocation purpose.
+	// Mission revocation binds under DecisionMissionRevoke.
 	DecisionPassRevocation DecisionPurpose = "pass_revocation"
+	// DecisionMissionRevoke gates mission revocation: the finish consumes
+	// the challenge, binds workspace, founder/session, pass, mission
+	// reference/version, descendants=true, and the normalized reason, and
+	// signs the exact decision attestation before any upstream call.
+	DecisionMissionRevoke DecisionPurpose = "mission_revoke"
 	// DecisionExpansionApproval approves a mission expansion.
 	DecisionExpansionApproval DecisionPurpose = "expansion_approval"
 	// DecisionCLILaunchAuthorization authorizes one CLI launch of an
@@ -141,7 +147,7 @@ const (
 // validDecisionPurpose reports whether p is a known purpose.
 func validDecisionPurpose(p DecisionPurpose) bool {
 	switch p {
-	case DecisionPassApproval, DecisionPassRevocation, DecisionExpansionApproval, DecisionCLILaunchAuthorization:
+	case DecisionPassApproval, DecisionPassRevocation, DecisionMissionRevoke, DecisionExpansionApproval, DecisionCLILaunchAuthorization:
 		return true
 	}
 	return false

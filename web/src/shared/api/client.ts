@@ -22,7 +22,13 @@ import type {
   MissionPassDraftReviseRequest,
   MissionPassReview,
   ProblemResponse,
+  RevocationResult,
+  RevokeBeginRequest,
+  RevokeBeginResponse,
+  RevokeFinishRequest,
+  RevokePendingResponse,
   SessionResponse,
+  TimelineResponse,
 } from './generated';
 
 // ApiError is raised for non-2xx local API responses. When the server
@@ -342,4 +348,101 @@ export async function finishCliAuthorization(
       title,
     );
   }
+}
+
+// fetchMissionEvents reads the safe projected event timeline of a
+// mission pass. Only safely projected upstream events are returned,
+// ordered by cursor; the response also carries the projection state,
+// reconciliation state, compatibility, staleness, containment, and the
+// verified repository name for trusted branch and PR links.
+export function fetchMissionEvents(
+  passId: string,
+  after?: string,
+  limit?: number,
+): Promise<TimelineResponse> {
+  const params = new URLSearchParams();
+  if (after) params.set('after', after);
+  if (limit !== undefined) params.set('limit', String(limit));
+  const query = params.toString();
+  const path = `/api/v1/mission-passes/${encodeURIComponent(passId)}/events${query ? `?${query}` : ''}`;
+  return request<TimelineResponse>(path);
+}
+
+// fetchTimeline is the legacy name for fetchMissionEvents.
+export const fetchTimeline = fetchMissionEvents;
+
+// beginRevoke starts the one-use passkey revocation ceremony for a
+// mission pass. The browser supplies only the fixed reason code; every
+// bound value comes from the server-side record.
+export function beginRevoke(
+  passId: string,
+  reason: string,
+  idempotencyKey?: string,
+): Promise<RevokeBeginResponse> {
+  const body: RevokeBeginRequest = { reason };
+  return postJson<RevokeBeginResponse>(
+    `/api/v1/mission-passes/${encodeURIComponent(passId)}/revoke/begin`,
+    body,
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// isRevokePending narrows the ambiguous finish union: a 200 carries the
+// revocation result, a 202 carries the pending reconciliation state. The
+// CLI handoff marker ({ handedToCli: true }) is neither.
+export function isRevokePending(
+  value: RevocationResult | RevokePendingResponse | { handedToCli: true },
+): value is RevokePendingResponse {
+  return typeof (value as RevokePendingResponse).reconciliation === 'string';
+}
+
+// finishRevoke completes the founder's passkey revocation ceremony.
+// A 202 carries RevokePendingResponse: the upstream outcome is
+// ambiguous, the intent is durable, and the timeline reconciles it.
+// When cliRevocationId is set, the server mints the one-use result code
+// and 302-redirects to the exact loopback callback; fetch follows the
+// redirect, the code reaches the waiting CLI, and this resolves with
+// { handedToCli: true } instead of a JSON body.
+export function finishRevoke(
+  passId: string,
+  challengeId: string,
+  assertion: unknown,
+  idempotencyKey?: string,
+  cliRevocationId?: string,
+): Promise<RevocationResult | RevokePendingResponse | { handedToCli: true }> {
+  const body: RevokeFinishRequest = { challenge_id: challengeId, assertion };
+  if (cliRevocationId) {
+    body.cli_revocation_id = cliRevocationId;
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (csrfToken !== null) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+  headers['Idempotency-Key'] = idempotencyKey ?? newIdempotencyKey();
+  const path = `/api/v1/mission-passes/${encodeURIComponent(passId)}/revoke/finish`;
+  /* v8 ignore next -- defensive: all call sites use compile-time local paths */
+  if (!path.startsWith('/')) {
+    throw new Error(`refusing non-local API path: ${path}`);
+  }
+  return fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 202) {
+      return (await res.json()) as RevokePendingResponse;
+    }
+    if (!res.ok) {
+      const title = await problemTitle(res);
+      throw new ApiError(res.status, `request to ${path} failed with status ${res.status}`, title);
+    }
+    if (cliRevocationId) {
+      // The 302 to the loopback callback was followed; the response is
+      // the CLI's plain-text confirmation, not JSON.
+      await res.text();
+      return { handedToCli: true as const };
+    }
+    return (await res.json()) as RevocationResult;
+  });
 }

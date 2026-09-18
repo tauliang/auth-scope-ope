@@ -90,6 +90,32 @@ export interface CLIAuthorizationCreateResponse {
   runner_arguments: string[];
 }
 
+export interface CLIRevocationCreateRequest {
+  code_challenge: string;
+  code_challenge_method: string;
+  pass_id: string;
+  redirect_uri: string;
+  state: string;
+}
+
+export interface CLIRevocationCreateResponse {
+  browser_url: string;
+  request_id: string;
+  revocation_digest: string;
+}
+
+export interface CLIRevocationExchangeRequest {
+  code: string;
+  code_verifier: string;
+  redirect_uri: string;
+  state: string;
+}
+
+export interface CLIRevocationExchangeResponse {
+  containment: string;
+  result_ref: string;
+}
+
 export interface CLITokenRequest {
   code: string;
   verifier: string;
@@ -241,8 +267,65 @@ export interface ReadyResponse {
   status: "ready" | "not_ready";
 }
 
+export interface RevocationResult {
+  containment: string;
+  mission_ref: string;
+  pass_id: string;
+  reason_code: string;
+  revoked: boolean;
+  revoked_at: string;
+}
+
+export interface RevokeBeginRequest {
+  reason: string;
+}
+
+export interface RevokeBeginResponse {
+  challenge_id: string;
+  options: unknown;
+}
+
+export interface RevokeFinishRequest {
+  assertion: unknown;
+  challenge_id: string;
+  cli_revocation_id?: string;
+}
+
+export interface RevokePendingResponse {
+  pass_id: string;
+  reconciliation: string;
+}
+
 export interface SessionResponse {
   csrf_token: string;
+}
+
+export interface TimelineEvent {
+  authscope_mission_version: number;
+  branch?: string;
+  check_kind?: string;
+  check_outcome?: string;
+  cursor: string;
+  event_id: string;
+  head_sha?: string;
+  occurred_at: string;
+  pull_request_number?: number;
+  reason_code?: string;
+  resource_digest: string;
+  type: string;
+}
+
+export interface TimelineResponse {
+  compatible: boolean;
+  containment: string;
+  cursor: string;
+  events: TimelineEvent[];
+  incompatibility_reason?: string;
+  pass_id: string;
+  reconciliation: string;
+  repository_name?: string;
+  stale: boolean;
+  state: string;
 }
 
 export interface WorkspaceBinding {

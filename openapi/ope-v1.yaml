@@ -936,6 +936,269 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/events:
+    get:
+      operationId: missionPassEvents
+      summary: Read the safe projected event timeline of a mission pass
+      description: >
+        Returns only the safely projected upstream events for the pass,
+        ordered by cursor, with the projection state, reconciliation
+        state, compatibility, staleness, and containment. Reading
+        reconciles any pending revocation intent first. Requires a
+        founder session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cursor after which to return events; defaults to the start.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+          description: Maximum events to return; capped at 100.
+      responses:
+        '200':
+          description: The projected timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/revoke/begin:
+    post:
+      operationId: missionPassRevokeBegin
+      summary: Begin the founder's passkey revocation ceremony for a mission pass
+      description: >
+        Starts a one-use WebAuthn decision ceremony revoking the exact
+        mission bindings pinned server-side (pass, mission reference and
+        version, revocation digest). The browser supplies only the
+        normalized reason code; every bound value comes from the
+        server-side record. Requires a founder session, exact host,
+        origin, and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeBeginRequest'
+      responses:
+        '200':
+          description: Revocation challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeBeginResponse'
+        '400':
+          description: Bad request (invalid reason code).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/revoke/finish:
+    post:
+      operationId: missionPassRevokeFinish
+      summary: Finish the founder's passkey revocation ceremony
+      description: >
+        Completes the one-use WebAuthn decision ceremony and revokes the
+        mission upstream exactly once under a deterministic idempotency
+        key. Returns 202 with a pending reconciliation state when the
+        upstream outcome is ambiguous; the revocation intent is durable
+        and the timeline reconciles it. When the request carries a CLI
+        revocation request ID, the one-use result code is minted after
+        the result settles or becomes pending, and the response is a 302
+        redirect to the exact loopback callback with the code and the
+        original state. Requires a founder session, exact host, origin,
+        and CSRF guards.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeFinishRequest'
+      responses:
+        '200':
+          description: The mission was revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationResult'
+        '202':
+          description: The upstream outcome is ambiguous; the revocation intent is durable and reconciles through the timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokePendingResponse'
+        '302':
+          description: Redirect to the exact loopback callback with the one-use result code and the original state, for the CLI handoff.
+        '400':
+          description: Bad request (invalid ceremony).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Revocation challenge or pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state, or the ceremony binding mismatches.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: The upstream outcome is ambiguous; reconcile through the timeline.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/revocations:
+    post:
+      operationId: cliRevocationCreate
+      summary: Create a result-only CLI revocation handoff
+      description: >
+        Called by the local CLI to open a result-only browser PKCE
+        handoff for revoking a governed mission. The pass must be in a
+        revocable state; the request binds the pass and the exact
+        server-canonical revocation digest, the S256 PKCE challenge, and
+        the exact loopback redirect URI. Returns the browser URL for the
+        founder's decision, where the founder picks the revocation
+        reason. The CLI exchanges the one-use result code for only the
+        opaque result reference and the fixed containment state; no
+        session or credential is ever issued. Requires no browser
+        session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIRevocationCreateRequest'
+      responses:
+        '201':
+          description: Revocation handoff created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIRevocationCreateResponse'
+        '400':
+          description: Bad request (invalid PKCE challenge or redirect URI).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not in a revocable state.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/revocations/token:
+    post:
+      operationId: cliRevocationTokenExchange
+      summary: Exchange one revocation result code for the result reference
+      description: >
+        Called by the local CLI after the browser decision. Exchanges
+        the one-use result code plus the PKCE verifier for only the
+        opaque result reference and the fixed containment state. Exactly
+        one revocation happens per request: a retry with the same code
+        after a lost response returns the original result reference, and
+        a wrong verifier or redirect is rejected without distinguishing
+        the cause. Requires no browser session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIRevocationExchangeRequest'
+      responses:
+        '200':
+          description: Exchange succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIRevocationExchangeResponse'
+        '400':
+          description: Bad request (malformed code, verifier, redirect, or state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '401':
+          description: The code, verifier, redirect URI, or state does not match.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Result code not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The revocation result is not minted or has expired.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -1452,3 +1715,177 @@ components:
           type: integer
         approval_decision_ref:
           type: string
+    TimelineEvent:
+      type: object
+      required: [event_id, cursor, type, occurred_at, authscope_mission_version, resource_digest]
+      properties:
+        event_id:
+          type: string
+        cursor:
+          type: string
+        type:
+          type: string
+          description: One of the safely projectable event types.
+        occurred_at:
+          type: string
+          format: date-time
+        authscope_mission_version:
+          type: integer
+        resource_digest:
+          type: string
+        reason_code:
+          type: string
+        branch:
+          type: string
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        check_kind:
+          type: string
+        check_outcome:
+          type: string
+    TimelineResponse:
+      type: object
+      required: [pass_id, state, reconciliation, events, cursor, compatible, stale, containment]
+      properties:
+        pass_id:
+          type: string
+        state:
+          type: string
+          description: The projected pass state.
+        reconciliation:
+          type: string
+          description: The current reconciliation state of the projection.
+        repository_name:
+          type: string
+          description: The verified repository binding (owner/repo) for trusted branch and PR links.
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        cursor:
+          type: string
+          description: The cursor of the last returned event, for pagination.
+        compatible:
+          type: boolean
+        stale:
+          type: boolean
+        incompatibility_reason:
+          type: string
+        containment:
+          type: string
+          description: The fixed containment state for a revoked pass.
+    RevokeBeginRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: One of the fixed normalized revocation reason codes.
+    RevokeBeginResponse:
+      type: object
+      required: [challenge_id, options]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn assertion options JSON for the decision
+            ceremony, as produced by the server verifier.
+    RevokeFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: Opaque WebAuthn assertion JSON from the credential.
+        cli_revocation_id:
+          type: string
+          description: >
+            Optional CLI revocation request ID. When present, the
+            one-use result code is minted after the revocation settles
+            or becomes pending, and the response is a 302 redirect to
+            the exact loopback callback.
+    RevocationResult:
+      type: object
+      required: [pass_id, mission_ref, revoked, containment, reason_code, revoked_at]
+      properties:
+        pass_id:
+          type: string
+        mission_ref:
+          type: string
+        revoked:
+          type: boolean
+        containment:
+          type: string
+        reason_code:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+    RevokePendingResponse:
+      type: object
+      required: [pass_id, reconciliation]
+      properties:
+        pass_id:
+          type: string
+        reconciliation:
+          type: string
+          description: The reconciliation state, pending while the ambiguous upstream outcome settles.
+    CLIRevocationCreateRequest:
+      type: object
+      required: [pass_id, redirect_uri, state, code_challenge, code_challenge_method]
+      properties:
+        pass_id:
+          type: string
+        redirect_uri:
+          type: string
+          description: The exact loopback redirect URI.
+        state:
+          type: string
+          description: The 256-bit handoff state, base64url with no padding.
+        code_challenge:
+          type: string
+          description: The S256 PKCE challenge, base64url with no padding.
+        code_challenge_method:
+          type: string
+          description: Always S256.
+    CLIRevocationCreateResponse:
+      type: object
+      required: [request_id, browser_url, revocation_digest]
+      properties:
+        request_id:
+          type: string
+        browser_url:
+          type: string
+        revocation_digest:
+          type: string
+          description: The revocation digest the browser decision is bound to.
+    CLIRevocationExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          description: The one-use result code, base64url with no padding.
+        code_verifier:
+          type: string
+          description: The S256 PKCE verifier, base64url with no padding.
+        redirect_uri:
+          type: string
+          description: The exact loopback redirect URI registered with the request.
+        state:
+          type: string
+          description: The original 256-bit handoff state, base64url with no padding.
+    CLIRevocationExchangeResponse:
+      type: object
+      required: [result_ref, containment]
+      properties:
+        result_ref:
+          type: string
+          description: The opaque revocation result reference.
+        containment:
+          type: string
+          description: The fixed containment state.

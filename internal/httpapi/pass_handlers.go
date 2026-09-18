@@ -73,6 +73,8 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 			handlePassGet(svc, w, r, principal)
 		}))
 	approvalRoutes(mux, svc, approval, authedStateChange)
+	revokeRoutes(mux, deps, authedStateChange)
+	eventRoutes(mux, deps, deps.Projector, deps.Revocation)
 }
 
 // PassDraftCreateRequest opens a mission-pass draft for one issue. Only

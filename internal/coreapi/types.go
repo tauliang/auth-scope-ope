@@ -382,6 +382,9 @@ type Revocation struct {
 	Revoked     bool   `json:"revoked"`
 	RevokedAt   int64  `json:"revoked_at"`
 	WorkspaceID string `json:"workspace_id"`
+	// Containment is the gateway containment acknowledged by the
+	// upstream: "acknowledged", "pending", or "partial".
+	Containment string `json:"containment"`
 }
 
 // Expansion is one requested authority expansion.

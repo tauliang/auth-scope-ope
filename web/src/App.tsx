@@ -10,6 +10,11 @@ import {
 import IssuePicker from './features/authorize/IssuePicker';
 import { MissionPassAuthorize } from './features/authorize/MissionPassReview';
 import { CLIAuthorization, cliAuthorizationIdFromPath } from './features/authorize/CLIAuthorization';
+import {
+  MissionPage,
+  cliRevocationIdFromSearch,
+  missionPassIdFromPath,
+} from './features/mission/MissionPage';
 
 type LoadState =
   | { kind: 'loading' }
@@ -181,6 +186,16 @@ export default function App() {
       typeof window !== 'undefined' ? cliAuthorizationIdFromPath(window.location.pathname) : null;
     if (cliAuthorizationId) {
       return <CLIAuthorization authorizationId={cliAuthorizationId} />;
+    }
+    // The mission route shows a pass timeline and the founder's revoke
+    // control, or the CLI revocation decision when the CLI opened the
+    // result-only handoff (?cli_revocation=).
+    const missionPassId =
+      typeof window !== 'undefined' ? missionPassIdFromPath(window.location.pathname) : null;
+    if (missionPassId) {
+      const cliRevocationId =
+        typeof window !== 'undefined' ? cliRevocationIdFromSearch(window.location.search) : null;
+      return <MissionPage passId={missionPassId} cliRevocationId={cliRevocationId} />;
     }
     return <AuthenticatedApp bootstrap={bootstrap} csrfToken={csrfToken} />;
   }

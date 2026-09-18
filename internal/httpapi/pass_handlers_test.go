@@ -13,6 +13,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
+	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -47,6 +48,11 @@ type stubPassAuthority struct {
 	identityKeys       map[string]ed25519.PublicKey
 	seenNonces         map[string]bool
 	expectedSubject    string
+	// Revocation stub fields (methods in revoke_handlers_test.go).
+	revokeCalls    int
+	revokeKeys     []string
+	revokedByKey   map[string]coreapi.Revocation
+	failRevokeOnce error
 }
 
 func (s *stubPassAuthority) ShapeMission(_ context.Context, in coreapi.ShapeMissionRequest, _ coreapi.RequestOptions) (coreapi.MissionDraft, error) {
@@ -134,17 +140,39 @@ func newPassFixture(t *testing.T) *passFixture {
 	if err != nil {
 		t.Fatalf("new CLI authorization service: %v", err)
 	}
+	revocation, err := missionpass.NewRevocationService(missionpass.RevocationConfig{
+		Store:     f.store,
+		Authn:     f.authn,
+		Authority: stub,
+		Attestor:  attestor,
+	})
+	if err != nil {
+		t.Fatalf("new revocation service: %v", err)
+	}
+	cliRevocation, err := missionpass.NewCLIRevocationService(missionpass.CLIRevocationConfig{
+		Store:       f.store,
+		Revocation:  revocation,
+		WorkspaceID: "ws-test",
+		BrowserURL:  "https://ope.example.com",
+	})
+	if err != nil {
+		t.Fatalf("new CLI revocation service: %v", err)
+	}
+	projector := missionpass.NewEventProjector(f.store, nil)
 	deps := Dependencies{
 		Config: f.config,
 		Contract: coreapi.ContractReport{
 			CoreVersion: "ope-v1.0.0", DigestMatch: true,
 			OperationsRequired: 36, OperationsPresent: 36,
 		},
-		Store:     f.store,
-		Authn:     f.authn,
-		Authority: stub,
-		Attestor:  attestor,
-		CLIAuth:   cliAuth,
+		Store:         f.store,
+		Authn:         f.authn,
+		Authority:     stub,
+		Attestor:      attestor,
+		CLIAuth:       cliAuth,
+		Revocation:    revocation,
+		CLIRevocation: cliRevocation,
+		Projector:     projector,
 	}
 	f.handler = New(deps)
 	csrf := f.enrollOverHTTP(t)

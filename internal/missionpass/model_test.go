@@ -10,11 +10,11 @@ import (
 // run-failure event enters outcome_pending; only a locally verified receipt
 // enters completed or failed. Reconciliation stays orthogonal to pass state.
 var validTransitions = map[PassState][]PassState{
-	PassDraft:             {PassApproved, PassRevoked, PassExpired},
+	PassDraft:             {PassApproved, PassExpired},
 	PassApproved:          {PassLaunching, PassRevoked, PassExpired},
 	PassLaunching:         {PassApproved, PassRunning, PassRevoked, PassExpired},
 	PassRunning:           {PassAwaitingExpansion, PassOutcomePending, PassRevoked, PassExpired},
-	PassAwaitingExpansion: {PassRunning, PassRevoked, PassExpired},
+	PassAwaitingExpansion: {PassRunning, PassOutcomePending, PassRevoked, PassExpired},
 	PassOutcomePending:    {PassCompleted, PassFailed, PassRevoked},
 }
 
@@ -134,5 +134,27 @@ func TestCanonicalApprovalBytes(t *testing.T) {
 		if string(CanonicalApprovalBytes(other)) == string(got) {
 			t.Error("approval bytes unchanged after mutating a bound value")
 		}
+	}
+}
+
+// TestRevocableStates pins exactly which pass states may be revoked.
+// Revocation works from approved, launching, running, awaiting_expansion,
+// and outcome_pending, and from no other state.
+func TestRevocableStates(t *testing.T) {
+	revocable := map[PassState]bool{
+		PassApproved: true, PassLaunching: true, PassRunning: true,
+		PassAwaitingExpansion: true, PassOutcomePending: true,
+	}
+	for _, state := range allPassStates {
+		if got := Revocable(state); got != revocable[state] {
+			t.Errorf("Revocable(%q) = %v, want %v", state, got, revocable[state])
+		}
+	}
+	// Draft is never revocable, and a revoked pass cannot be revoked again.
+	if Revocable(PassDraft) {
+		t.Error("Revocable(draft) = true, want false")
+	}
+	if Revocable(PassRevoked) {
+		t.Error("Revocable(revoked) = true, want false")
 	}
 }

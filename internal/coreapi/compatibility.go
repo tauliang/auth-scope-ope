@@ -195,6 +195,12 @@ type Gate struct {
 	mu           sync.RWMutex
 	lastVerified time.Time
 	digest       string
+	// projectionBlocked latches when an unknown authenticated event type
+	// arrives: business mutations fail closed until a parser and
+	// pinned-contract upgrade replays from the unchanged cursor and
+	// releases the latch.
+	projectionBlocked bool
+	projectionReason  string
 }
 
 // NewGate builds the gate over an Authority client and the presentation
@@ -263,14 +269,48 @@ func (g *Gate) Verify(ctx context.Context) error {
 }
 
 // Healthy reports whether a successful verification happened within the
-// last thirty seconds. It is false before the first success.
+// last thirty seconds. It is false before the first success, and false
+// while the projection gate is latched by an unknown authenticated event
+// type.
 func (g *Gate) Healthy() bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	if g.projectionBlocked {
+		return false
+	}
 	if g.lastVerified.IsZero() {
 		return false
 	}
 	return g.clock().Sub(g.lastVerified) <= gateMaxStale
+}
+
+// NoteProjectionIncompatible latches the projection gate with the fixed
+// local reason. Every business mutation fails closed until
+// ClearProjectionIncompatible runs after a parser and pinned-contract
+// upgrade replays from the unchanged cursor.
+func (g *Gate) NoteProjectionIncompatible(reason string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.projectionBlocked = true
+	g.projectionReason = reason
+}
+
+// ClearProjectionIncompatible releases the projection latch. Call it only
+// after the parser and pinned-contract upgrade replayed from the
+// unchanged cursor.
+func (g *Gate) ClearProjectionIncompatible() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.projectionBlocked = false
+	g.projectionReason = ""
+}
+
+// ProjectionBlocked reports whether an unknown authenticated event type
+// latched the projection gate, with the fixed local reason.
+func (g *Gate) ProjectionBlocked() (bool, string) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.projectionBlocked, g.projectionReason
 }
 
 // LastVerified returns the last successful verification time, or the zero

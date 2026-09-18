@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql migrations/009_event_projections.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -38,6 +38,7 @@ var migrations = []struct {
 	{"006_mission_pass_approval", "migrations/006_mission_pass_approval.sql"},
 	{"007_cli_authorizations", "migrations/007_cli_authorizations.sql"},
 	{"008_launch_exchange", "migrations/008_launch_exchange.sql"},
+	{"009_event_projections", "migrations/009_event_projections.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -869,6 +870,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		    approval_decision_ref = ?,
 		    attestation_digest = ?,
 		    run_id = ?,
+		    containment = ?,
 		    updated_at = ?
 		WHERE workspace_id = ? AND pass_id = ? AND store_revision = ?`,
 		rec.DraftVersion, rec.AuthScopeMissionVersion,
@@ -880,7 +882,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		rec.Objective, criteria, rec.ShapedDraftJSON,
 		rec.State, rec.Reconciliation,
 		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef,
-		rec.AttestationDigest, rec.RunID, now,
+		rec.AttestationDigest, rec.RunID, rec.Containment, now,
 		rec.WorkspaceID, rec.PassID, expectedStoreRevision)
 	if err != nil {
 		return fmt.Errorf("store: put mission pass: %w", err)
@@ -904,8 +906,9 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		 expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
 		 shaped_draft_json, state, reconciliation,
 		 mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
+		 containment,
 		 created_at, updated_at)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.WorkspaceID, rec.PassID, rec.DraftVersion, rec.AuthScopeMissionVersion,
 		rec.ConnectionID, rec.IssueNumber, rec.RepositoryName,
 		rec.ProposalID, rec.ProposalDigest, rec.ApprovedProposalDigest,
@@ -914,6 +917,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros, rec.Objective, criteria,
 		rec.ShapedDraftJSON, rec.State, rec.Reconciliation,
 		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef, rec.AttestationDigest, rec.RunID,
+		rec.Containment,
 		formatTime(rec.CreatedAt), now)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -932,6 +936,7 @@ const missionPassColumns = `workspace_id, pass_id, store_revision, draft_version
 	expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
 	shaped_draft_json, state, reconciliation,
 	mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
+	containment,
 	created_at, updated_at`
 
 func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (MissionPassRecord, error) {
@@ -947,7 +952,7 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
 			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation,
 			&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
-			&rec.AttestationDigest, &rec.RunID, &created, &updated)
+			&rec.AttestationDigest, &rec.RunID, &rec.Containment, &created, &updated)
 	if err == sql.ErrNoRows {
 		return MissionPassRecord{}, fmt.Errorf("%w: mission pass %q", ErrNotFound, passID)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
+	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -45,6 +46,18 @@ type Dependencies struct {
 	// prepared governed run. Nil in tests that do not exercise the token
 	// route; the token route is registered only when it is present.
 	Launch launchExchanger
+	// Revocation runs the founder's passkey revocation ceremony. Nil in
+	// tests that do not exercise the revocation routes; the revocation
+	// routes are registered only when it is present.
+	Revocation *missionpass.RevocationService
+	// CLIRevocation runs the result-only loopback PKCE handoff for CLI
+	// revocation. Nil in tests that do not exercise the CLI revocation
+	// routes; they are registered only when it is present.
+	CLIRevocation *missionpass.CLIRevocationService
+	// Projector serves the safe event timeline. Nil in tests that do
+	// not exercise the timeline route; it is registered only when it is
+	// present.
+	Projector *missionpass.EventProjector
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2

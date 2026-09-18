@@ -23,6 +23,8 @@ import (
 	"github.com/tauliang/authscope-ope/internal/httpapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/launch"
+	"github.com/tauliang/authscope-ope/internal/missionpass"
+	"github.com/tauliang/authscope-ope/internal/reconcile"
 	"github.com/tauliang/authscope-ope/internal/store"
 	"github.com/tauliang/authscope-ope/internal/trust"
 )
@@ -41,6 +43,10 @@ func main() {
 		if err := runLaunch(os.Args[2:]); err != nil {
 			log.Fatalf("run: %v", err)
 		}
+	case "revoke":
+		if err := runRevoke(os.Args[2:]); err != nil {
+			log.Fatalf("revoke: %v", err)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
@@ -49,7 +55,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve         start the local OPE HTTP server\n  run <pass-id> authorize one launch of an approved pass through the browser\n")
+	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve                        start the local OPE HTTP server\n  run <pass-id>                authorize one launch of an approved pass through the browser\n  revoke <pass-id> <reason>    revoke a governed mission through the founder's browser\n")
 }
 
 func runServe() error {
@@ -73,7 +79,8 @@ func runServe() error {
 			log.Printf("close store: %v", err)
 		}
 	}()
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	signer, err := resolveWorkloadSigner(cfg)
 	if err != nil {
 		return err
@@ -137,6 +144,47 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("launch service: %w", err)
 	}
+	// Task 10: the safe event projector replays the authority's event
+	// stream into the local projection with strict allowlisted decoding
+	// and durable cursors; the revocation service governs
+	// founder-decided mission revocations with canonical passkey
+	// binding; the CLI revocation service runs the result-only loopback
+	// PKCE handoff. The reconciliation worker keeps projections fresh
+	// and retries stuck revocation intents under a single-instance
+	// lease.
+	projector := missionpass.NewEventProjector(st, gate)
+	revocationSvc, err := missionpass.NewRevocationService(missionpass.RevocationConfig{
+		Store:     st,
+		Authn:     authnSvc,
+		Authority: gated,
+		Attestor:  attestor,
+	})
+	if err != nil {
+		return fmt.Errorf("revocation service: %w", err)
+	}
+	cliRevocationSvc, err := missionpass.NewCLIRevocationService(missionpass.CLIRevocationConfig{
+		Store:       st,
+		Revocation:  revocationSvc,
+		WorkspaceID: cfg.WorkspaceID,
+		BrowserURL:  cfg.Origin,
+	})
+	if err != nil {
+		return fmt.Errorf("CLI revocation service: %w", err)
+	}
+	worker, err := reconcile.NewWorker(reconcile.Config{
+		Store:        st,
+		Authority:    gated,
+		Projector:    projector,
+		Revocation:   revocationSvc,
+		InstanceID:   cfg.InstanceID,
+		WorkspaceID:  cfg.WorkspaceID,
+		PollInterval: 10 * time.Second,
+		LeaseTTL:     30 * time.Second,
+		Log:          log.Printf,
+	})
+	if err != nil {
+		return fmt.Errorf("reconciliation worker: %w", err)
+	}
 	// The bootstrap code is issued and printed only for an unenrolled
 	// instance. EnsureBootstrapCode returns an empty code once a founder
 	// is enrolled, so the secret never appears on the terminal again.
@@ -151,9 +199,41 @@ func runServe() error {
 		Attestor: attestor,
 		CLIAuth:  cliAuth,
 		Launch:   launchSvc,
+		Revocation: revocationSvc,
+		CLIRevocation: cliRevocationSvc,
+		Projector:  projector,
 	})
-	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
-	return http.ListenAndServe(cfg.BindAddr, handler)
+	srv := &http.Server{Addr: cfg.BindAddr, Handler: handler}
+	// A server start failure (for example, the port is taken) returns
+	// from runServe instead of leaving it blocked on the signal.
+	serverErr := make(chan error, 1)
+	workerErr := make(chan error, 1)
+	go func() {
+		log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
+		serverErr <- srv.ListenAndServe()
+	}()
+	go func() { workerErr <- worker.Run(ctx) }()
+	select {
+	case <-ctx.Done():
+		// Signal received: shut down gracefully below.
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			stop()
+			if werr := <-workerErr; werr != nil {
+				log.Printf("reconciliation worker: %v", werr)
+			}
+			return fmt.Errorf("http server: %w", err)
+		}
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+	if err := <-workerErr; err != nil {
+		return fmt.Errorf("reconciliation worker: %w", err)
+	}
+	return nil
 }
 
 // runLaunch authorizes one launch of an approved pass through the
@@ -214,6 +294,29 @@ func runLaunch(args []string) error {
 	}
 	fmt.Printf("Governed run %s finished.\n", payload.RunID)
 	return nil
+}
+
+// runRevoke revokes a governed mission through the founder's browser:
+// the CLI registers the revocation with the fixed reason, the founder
+// decides in the browser, and the CLI exchanges the one-use result code
+// for only the opaque result reference plus the fixed containment
+// state. No session or credential is issued; handoff secrets are zeroed
+// on completion, cancellation, or signal.
+func runRevoke(args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("usage: authscope-ope revoke <pass-id>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	apiBase := "http://" + cfg.BindAddr
+	// RevokeMission prints the browser URL and the final result; it
+	// returns the outcome for callers that need it programmatically.
+	_, err = cli.RevokeMission(ctx, apiBase, args[0], cli.RevokeOptions{})
+	return err
 }
 
 // resolveWorkloadSigner resolves the non-exportable workload signer for
