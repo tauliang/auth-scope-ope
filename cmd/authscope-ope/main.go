@@ -1,17 +1,21 @@
 // Command authscope-ope is the OPE edition server and CLI. It composes the
-// local product: configuration, the upstream contract gate, and the HTTP
-// API. Later tasks add doctor, run, revoke, and recover commands.
+// local product: configuration, the upstream contract gate, the durable
+// instance binding, and the HTTP API. Later tasks add doctor, run, revoke,
+// and recover commands.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
+	"github.com/tauliang/authscope-ope/internal/store"
 )
 
 func main() {
@@ -47,7 +51,39 @@ func runServe() error {
 	if !report.DigestMatch {
 		return fmt.Errorf("upstream contract digest mismatch: %v", report.Problems)
 	}
-	handler := httpapi.New(httpapi.Dependencies{Config: cfg, Contract: report})
+	st, err := bindInstance(cfg)
+	if err != nil {
+		return err
+	}
+	handler := httpapi.New(httpapi.Dependencies{Config: cfg, Contract: report, Store: st})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)
+}
+
+// bindInstance opens the presentation store and establishes the immutable
+// instance binding before any route is registered. It fails closed when the
+// stored binding differs from configuration, so a misconfigured instance
+// can never serve another workspace's state.
+func bindInstance(cfg config.Config) (store.Store, error) {
+	st, err := store.Open(cfg.DataDir, cfg.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+	ctx := context.Background()
+	rec := store.InstanceRecord{
+		InstanceID:        cfg.InstanceID,
+		WorkspaceID:       cfg.WorkspaceID,
+		Hostname:          cfg.Hostname,
+		Origin:            cfg.Origin,
+		RPID:              cfg.RPID,
+		SessionCookieName: cfg.SessionCookieName,
+		CreatedAt:         time.Now().UTC(),
+	}
+	if err := st.WithTx(ctx, func(tx store.Tx) error {
+		return tx.BindInstance(ctx, rec)
+	}); err != nil {
+		return nil, fmt.Errorf("bind instance: %w", err)
+	}
+	log.Printf("instance %s bound to workspace %q", cfg.InstanceID, cfg.WorkspaceID)
+	return st, nil
 }

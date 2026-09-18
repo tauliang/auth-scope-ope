@@ -9,16 +9,18 @@ import (
 
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/store"
 )
 
 // maxBodyBytes bounds every JSON request body the local API accepts.
 const maxBodyBytes = 1 << 20
 
-// Dependencies wires the HTTP server. Later tasks add the store, AuthScope
-// client, and session manager here.
+// Dependencies wires the HTTP server. Later tasks add the AuthScope client
+// and session manager here.
 type Dependencies struct {
 	Config   config.Config
 	Contract coreapi.ContractReport
+	Store    store.Store
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2

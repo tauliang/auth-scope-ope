@@ -7,20 +7,28 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/tauliang/authscope-ope/internal/store"
 )
 
 var (
-	ErrMissingAuthScopeURL          = errors.New("config: AUTH_SCOPE_URL is required")
-	ErrInvalidAuthScopeURL          = errors.New("config: AUTH_SCOPE_URL is not a valid URL")
-	ErrInsecureAuthScopeURL         = errors.New("config: AUTH_SCOPE_URL must use https in release mode")
-	ErrInvalidMode                  = errors.New("config: OPE_MODE must be development or release")
+	ErrMissingAuthScopeURL            = errors.New("config: AUTH_SCOPE_URL is required")
+	ErrInvalidAuthScopeURL            = errors.New("config: AUTH_SCOPE_URL is not a valid URL")
+	ErrInsecureAuthScopeURL           = errors.New("config: AUTH_SCOPE_URL must use https in release mode")
+	ErrInvalidMode                    = errors.New("config: OPE_MODE must be development or release")
 	ErrMissingWorkloadSignerReference = errors.New("config: OPE_WORKLOAD_SIGNER_REF is required in release mode")
-	ErrStaticCredentialRejected     = errors.New("config: static credential rejected in release mode")
+	ErrStaticCredentialRejected       = errors.New("config: static credential rejected in release mode")
+	ErrMissingWorkspaceID             = errors.New("config: OPE_WORKSPACE_ID is required")
+	ErrMissingHostname                = errors.New("config: OPE_HOSTNAME is required")
+	ErrMissingOrigin                  = errors.New("config: OPE_ORIGIN is required")
+	ErrMissingRPID                    = errors.New("config: OPE_RP_ID is required")
 )
 
 // Config is the validated operator configuration for one OPE instance.
@@ -38,6 +46,23 @@ type Config struct {
 	DataDir string
 	// RootDir is the repository root used to locate contracts/ at runtime.
 	RootDir string
+	// WorkspaceID is the single AuthScope workspace this instance serves.
+	// Personal and business activity use separate instances.
+	WorkspaceID string
+	// Hostname is the public hostname of this instance.
+	Hostname string
+	// Origin is the exact browser origin (scheme://host[:port]) served.
+	Origin string
+	// RPID is the WebAuthn relying-party ID for passkey authentication.
+	RPID string
+	// InstanceID uniquely identifies this instance deployment. When
+	// OPE_INSTANCE_ID is unset it defaults to a stable digest of the
+	// workspace and hostname, so restarts rebind the same instance instead
+	// of failing closed.
+	InstanceID string
+	// SessionCookieName is the __Host- session cookie name derived from the
+	// instance ID.
+	SessionCookieName string
 }
 
 // Load reads and validates configuration from the environment.
@@ -79,7 +104,66 @@ func Load() (Config, error) {
 	c.BindAddr = getenv("OPE_BIND_ADDR", "127.0.0.1:8080")
 	c.DataDir = getenv("OPE_DATA_DIR", "./var/ope")
 	c.RootDir = getenv("OPE_ROOT", ".")
+
+	if err := loadInstanceBinding(&c); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// loadInstanceBinding reads the immutable instance binding from the
+// environment: workspace, hostname, origin, RP ID, and instance ID. The
+// session cookie name derives from the instance ID.
+func loadInstanceBinding(c *Config) error {
+	c.WorkspaceID = strings.TrimSpace(os.Getenv("OPE_WORKSPACE_ID"))
+	if c.WorkspaceID == "" {
+		return ErrMissingWorkspaceID
+	}
+
+	c.Hostname = strings.TrimSpace(os.Getenv("OPE_HOSTNAME"))
+	if c.Hostname == "" {
+		return ErrMissingHostname
+	}
+	if err := store.ValidateHostname(c.Hostname); err != nil {
+		return fmt.Errorf("config: OPE_HOSTNAME: %w", err)
+	}
+
+	c.Origin = strings.TrimSpace(os.Getenv("OPE_ORIGIN"))
+	if c.Origin == "" {
+		return ErrMissingOrigin
+	}
+	origin, err := store.ValidateOrigin(c.Origin, c.Mode)
+	if err != nil {
+		return fmt.Errorf("config: OPE_ORIGIN: %w", err)
+	}
+
+	c.RPID = strings.TrimSpace(os.Getenv("OPE_RP_ID"))
+	if c.RPID == "" {
+		return ErrMissingRPID
+	}
+	if err := store.ValidateRPID(c.RPID, origin, c.Mode); err != nil {
+		return fmt.Errorf("config: OPE_RP_ID: %w", err)
+	}
+
+	c.InstanceID = strings.TrimSpace(os.Getenv("OPE_INSTANCE_ID"))
+	if c.InstanceID == "" {
+		c.InstanceID = defaultInstanceID(c.WorkspaceID, c.Hostname)
+	} else if err := store.ValidateInstanceID(c.InstanceID); err != nil {
+		return fmt.Errorf("config: OPE_INSTANCE_ID: %w", err)
+	}
+
+	c.SessionCookieName = store.DeriveSessionCookieName(c.InstanceID)
+	return nil
+}
+
+// defaultInstanceID derives a stable instance ID from the workspace and
+// hostname. Stability across restarts matters: the store binds the instance
+// record once, and a fresh random ID on every start would fail closed with
+// ErrInstanceRebind. Distinct hostnames (or workspaces) still yield distinct
+// IDs, matching the one-instance-per-workspace deployment model.
+func defaultInstanceID(workspaceID, hostname string) string {
+	sum := sha256.Sum256([]byte("authscope-ope/instance-id/v1\x00" + workspaceID + "\x00" + hostname))
+	return hex.EncodeToString(sum[:16])
 }
 
 func getenv(key, def string) string {
