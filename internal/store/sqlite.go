@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql migrations/009_event_projections.sql migrations/010_expansions.sql migrations/011_receipts.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql migrations/009_event_projections.sql migrations/010_expansions.sql migrations/011_receipts.sql migrations/012_recovery.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -41,6 +41,7 @@ var migrations = []struct {
 	{"009_event_projections", "migrations/009_event_projections.sql"},
 	{"010_expansions", "migrations/010_expansions.sql"},
 	{"011_receipts", "migrations/011_receipts.sql"},
+	{"012_recovery", "migrations/012_recovery.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -68,6 +69,10 @@ type dbConn interface {
 type sqliteStore struct {
 	db   *sql.DB
 	mode string
+	// lockFile holds the exclusive data-directory lock taken by
+	// OpenExclusive. It is nil for stores opened with Open. Closing the
+	// file releases the lock.
+	lockFile *os.File
 }
 
 type sqliteTx struct {
@@ -79,12 +84,60 @@ type sqliteTx struct {
 // database file is <dataDir>/ope.db. mode is "development" or "release" and
 // controls the data-path hardening checks.
 func Open(dataDir, mode string) (Store, error) {
+	return open(dataDir, mode, false)
+}
+
+// lockFileName is the data-directory lock file. The server and the
+// offline recovery command each take an exclusive advisory lock on it
+// for their whole lifetime, so recovery refuses to run while the server
+// owns the database.
+const lockFileName = ".ope.lock"
+
+// OpenExclusive opens the presentation store like Open and additionally
+// holds an exclusive advisory lock on the data directory until Close.
+// A second OpenExclusive on the same data directory fails with
+// ErrDatabaseLocked while the first store is alive. The server opens
+// this way at startup; the offline recovery command opens this way and
+// refuses to run while the server holds the lock. The lock is acquired
+// before the database file is opened or any migration runs, so a second
+// process can never observe or mutate the database while the first owns
+// it.
+func OpenExclusive(dataDir, mode string) (Store, error) {
+	return open(dataDir, mode, true)
+}
+
+func open(dataDir, mode string, exclusive bool) (Store, error) {
 	if mode != "development" && mode != "release" {
 		return nil, fmt.Errorf("store: invalid mode %q", mode)
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("store: create data dir: %w", err)
 	}
+	var lockFile *os.File
+	if exclusive {
+		f, err := os.OpenFile(filepath.Join(dataDir, lockFileName), os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("store: open lock file: %w", err)
+		}
+		if err := lockExclusiveNonblock(f); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("%w: stop the running server first", ErrDatabaseLocked)
+		}
+		lockFile = f
+	}
+	st, err := openDatabase(dataDir, mode)
+	if err != nil {
+		if lockFile != nil {
+			lockFile.Close()
+		}
+		return nil, err
+	}
+	s := st.(*sqliteStore)
+	s.lockFile = lockFile
+	return s, nil
+}
+
+func openDatabase(dataDir, mode string) (Store, error) {
 	dbPath := filepath.Join(dataDir, dbFileName)
 	if mode == "release" {
 		if err := checkPathHardened(dataDir); err != nil {
@@ -175,7 +228,16 @@ func runMigrations(db *sql.DB) error {
 }
 
 func (s *sqliteStore) Close() error {
-	return s.db.Close()
+	// Closing the lock file releases the exclusive data-directory lock.
+	var lockErr error
+	if s.lockFile != nil {
+		lockErr = s.lockFile.Close()
+		s.lockFile = nil
+	}
+	if err := s.db.Close(); err != nil {
+		return err
+	}
+	return lockErr
 }
 
 func (s *sqliteStore) WithTx(ctx context.Context, fn func(Tx) error) error {

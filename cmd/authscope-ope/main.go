@@ -49,6 +49,14 @@ func main() {
 		if err := runRevoke(os.Args[2:]); err != nil {
 			log.Fatalf("revoke: %v", err)
 		}
+	case "doctor":
+		if err := runDoctor(os.Args[2:]); err != nil {
+			log.Fatalf("doctor: %v", err)
+		}
+	case "recover":
+		if err := runRecover(os.Args[2:]); err != nil {
+			log.Fatalf("recover: %v", err)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
@@ -57,7 +65,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve                        start the local OPE HTTP server\n  run <pass-id>                authorize one launch of an approved pass through the browser\n  revoke <pass-id> <reason>    revoke a governed mission through the founder's browser\n")
+	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve                        start the local OPE HTTP server\n  run <pass-id>                authorize one launch of an approved pass through the browser\n  revoke <pass-id> <reason>    revoke a governed mission through the founder's browser\n  doctor                       run read-only preflight diagnostics\n  recover --data-dir <path>    offline recovery with the one-time recovery key (absolute data dir)\n")
 }
 
 func runServe() error {
@@ -358,6 +366,96 @@ func runRevoke(args []string) error {
 	return err
 }
 
+// runDoctor runs read-only preflight diagnostics against the bound
+// instance. It exits non-zero when any check fails.
+func runDoctor(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: authscope-ope doctor")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	signer, err := resolveWorkloadSigner(cfg)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	checks, err := cli.RunDoctor(ctx, cli.DoctorConfig{
+		DataDir:           cfg.DataDir,
+		Mode:              cfg.Mode,
+		AuthScopeURL:      cfg.AuthScopeURL,
+		WorkspaceID:       cfg.WorkspaceID,
+		Hostname:          cfg.Hostname,
+		Origin:            cfg.Origin,
+		RPID:              cfg.RPID,
+		InstanceID:        cfg.InstanceID,
+		SessionCookieName: cfg.SessionCookieName,
+		RunnerPath:        cfg.RunnerPath,
+		RootDir:           cfg.RootDir,
+		BindAddr:          cfg.BindAddr,
+		Signer:            signer,
+	})
+	if err != nil {
+		return err
+	}
+	if n := countFailed(checks); n > 0 {
+		return fmt.Errorf("doctor: %d check(s) failed", n)
+	}
+	return nil
+}
+
+func countFailed(checks []cli.DoctorCheck) int {
+	var n int
+	for _, c := range checks {
+		if !c.Pass {
+			n++
+		}
+	}
+	return n
+}
+
+// runRecover runs offline recovery. The exact syntax is
+// "authscope-ope recover --data-dir <absolute-path>": the recovery key
+// is read from the controlling terminal with echo disabled, never from
+// argv, the environment, or configuration.
+func runRecover(args []string) error {
+	var dataDir string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--data-dir" && i+1 < len(args) {
+			dataDir = args[i+1]
+			i++
+			continue
+		}
+		return fmt.Errorf("usage: authscope-ope recover --data-dir <absolute-path>")
+	}
+	if dataDir == "" {
+		return fmt.Errorf("usage: authscope-ope recover --data-dir <absolute-path>")
+	}
+	// The flag selects the instance: it takes precedence over the
+	// OPE_DATA_DIR environment variable for this process.
+	if err := os.Setenv("OPE_DATA_DIR", dataDir); err != nil {
+		return fmt.Errorf("recover: %w", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	signer, err := resolveWorkloadSigner(cfg)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return cli.RunRecover(ctx, cli.RecoverConfig{
+		DataDir:      cfg.DataDir,
+		Mode:         cfg.Mode,
+		AuthScopeURL: cfg.AuthScopeURL,
+		Signer:       signer,
+	})
+}
+
 // resolveWorkloadSigner resolves the non-exportable workload signer for
 // the AuthScope transport and decision attestations. Release mode fails
 // closed: HSM/TEE-backed reference resolution lands in a later task, so
@@ -373,12 +471,14 @@ func resolveWorkloadSigner(cfg config.Config) (identity.Signer, error) {
 	return identity.NewEphemeralSigner(), nil
 }
 
-// bindInstance opens the presentation store and establishes the immutable
-// instance binding before any route is registered. It fails closed when the
-// stored binding differs from configuration, so a misconfigured instance
-// can never serve another workspace's state.
+// bindInstance opens the presentation store exclusively and establishes
+// the immutable instance binding before any route is registered. It fails
+// closed when the stored binding differs from configuration, so a
+// misconfigured instance can never serve another workspace's state. The
+// exclusive lock is held for the life of the server: offline recovery
+// refuses to run while the server owns the data directory.
 func bindInstance(cfg config.Config) (store.Store, error) {
-	st, err := store.Open(cfg.DataDir, cfg.Mode)
+	st, err := store.OpenExclusive(cfg.DataDir, cfg.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

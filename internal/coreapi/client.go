@@ -241,20 +241,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 // decoding; discovery alone decodes leniently because its contract
 // response schema is GenericObject.
 func (c *Client) doInner(ctx context.Context, method, path string, query url.Values, in, out any, opts RequestOptions, strict bool) error {
-	if opts.WorkspaceID == "" {
-		return ErrMissingWorkspace
-	}
-	var body []byte
-	if in != nil {
-		var err error
-		if body, err = canonicalJSON(in); err != nil {
-			return err
-		}
-	}
-	target := c.base.ResolveReference(&url.URL{Path: path})
-	if query != nil {
-		target.RawQuery = query.Encode()
-	}
+	// The caller owns the request timeout: the cancel function must live
+	// for the whole request, including roundTrip, so it is deferred here
+	// rather than inside buildRequest.
 	timeout := c.defaultTimeout
 	if opts.Timeout > 0 {
 		timeout = opts.Timeout
@@ -264,13 +253,39 @@ func (c *Client) doInner(ctx context.Context, method, path string, query url.Val
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	req, err := c.buildRequest(ctx, method, path, query, in, opts)
+	if err != nil {
+		return err
+	}
+	return c.roundTrip(req, out, strict)
+}
+
+// buildRequest assembles one authenticated upstream request.
+func (c *Client) buildRequest(ctx context.Context, method, path string, query url.Values, in any, opts RequestOptions) (*http.Request, error) {
+	if opts.WorkspaceID == "" {
+		return nil, ErrMissingWorkspace
+	}
+	var body []byte
+	if in != nil {
+		var err error
+		if body, err = canonicalJSON(in); err != nil {
+			return nil, err
+		}
+	}
+	target := c.base.ResolveReference(&url.URL{Path: path})
+	if query != nil {
+		target.RawQuery = query.Encode()
+	}
+	// buildRequest uses the caller's context as-is; the request timeout
+	// is owned by doInner, which defers the cancel function for the
+	// whole request lifecycle.
 	var bodyReader io.Reader
 	if len(body) > 0 {
 		bodyReader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), bodyReader)
 	if err != nil {
-		return fmt.Errorf("coreapi: cannot build request: %w", err)
+		return nil, fmt.Errorf("coreapi: cannot build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-AuthScope-Workspace", opts.WorkspaceID)
@@ -291,7 +306,37 @@ func (c *Client) doInner(ctx context.Context, method, path string, query url.Val
 	if opts.MissionVersion > 0 {
 		req.Header.Set("X-AuthScope-Mission-Version", strconv.FormatInt(opts.MissionVersion, 10))
 	}
-	return c.roundTrip(req, out, strict)
+	return req, nil
+}
+
+// ServerTime returns AuthScope's current time as observed in the Date
+// response header of a discovery call. Doctor uses it for the
+// clock-skew check; it performs no business mutation and touches no
+// contract schema.
+func (c *Client) ServerTime(ctx context.Context) (time.Time, error) {
+	req, err := c.buildRequest(ctx, http.MethodGet, "/.well-known/mission-authority", nil, nil,
+		RequestOptions{WorkspaceID: "discovery"})
+	if err != nil {
+		return time.Time{}, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("coreapi: server time: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes+1))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return time.Time{}, fmt.Errorf("coreapi: server time: unexpected status %d", resp.StatusCode)
+	}
+	date := resp.Header.Get("Date")
+	if date == "" {
+		return time.Time{}, errors.New("coreapi: server time: no Date header in response")
+	}
+	t, err := http.ParseTime(date)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("coreapi: server time: bad Date header: %w", err)
+	}
+	return t, nil
 }
 
 func (c *Client) roundTrip(req *http.Request, out any, strict bool) error {

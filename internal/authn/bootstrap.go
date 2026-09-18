@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -351,6 +352,64 @@ func (b *BootstrapService) Complete(ctx context.Context, ceremonyToken, recovery
 		SessionToken: sessionToken,
 		CSRFToken:    csrfToken,
 	}, nil
+}
+
+// IssueRecoveryBootstrapCode generates a fresh 128-bit one-use
+// bootstrap code for an enrolled workspace after an offline recovery,
+// persists its SHA-256 hash with a ten-minute expiry, and returns the
+// raw code bytes for the controlling terminal. Unlike
+// EnsureBootstrapCode it does not require the workspace to be
+// unenrolled: recovery wipes authentication state and the founder
+// re-enrolls through this code, choosing a replacement recovery method
+// during the ceremony. The raw code is never stored or logged; the
+// caller must zero the returned slice after delivering it.
+func IssueRecoveryBootstrapCode(ctx context.Context, st store.Store, workspaceID string) ([]byte, time.Time, error) {
+	if st == nil {
+		return nil, time.Time{}, errors.New("authn: store is required")
+	}
+	var raw []byte
+	var expiresAt time.Time
+	if err := st.WithTx(ctx, func(tx store.Tx) error {
+		var err error
+		raw, expiresAt, err = IssueRecoveryBootstrapCodeTx(ctx, tx, workspaceID, time.Now().UTC())
+		return err
+	}); err != nil {
+		return nil, time.Time{}, err
+	}
+	return raw, expiresAt, nil
+}
+
+// IssueRecoveryBootstrapCodeTx generates one raw 128-bit bootstrap code
+// and stores its SHA-256 hash inside the caller's transaction. The raw
+// bytes are returned for one-time delivery; the caller must zero them
+// after delivery. Keeping persistence inside the caller's transaction
+// lets offline recovery issue the code atomically with its resets.
+func IssueRecoveryBootstrapCodeTx(ctx context.Context, tx store.Tx, workspaceID string, now time.Time) ([]byte, time.Time, error) {
+	if tx == nil {
+		return nil, time.Time{}, errors.New("authn: transaction is required")
+	}
+	if workspaceID == "" {
+		return nil, time.Time{}, errors.New("authn: workspace ID is required")
+	}
+	raw, err := randomBytes(16)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	now = now.UTC()
+	expiresAt := now.Add(bootstrapCodeTTL)
+	rec := store.BootstrapCodeRecord{
+		WorkspaceID: workspaceID,
+		CodeHash:    sha256Hex(raw),
+		CreatedAt:   now,
+		ExpiresAt:   expiresAt,
+	}
+	if err := tx.PutBootstrapCode(ctx, rec); err != nil {
+		for i := range raw {
+			raw[i] = 0
+		}
+		return nil, time.Time{}, fmt.Errorf("authn: persist recovery bootstrap code: %w", err)
+	}
+	return raw, expiresAt, nil
 }
 
 // enrolled reports whether the workspace has a founder.

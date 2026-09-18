@@ -1,0 +1,60 @@
+# Compose deployment for one workspace-bound OPE instance.
+#
+# One instance binds one workspace: run one service per workspace, each
+# with its own data volume and its own OPE_WORKSPACE_ID. The published
+# port is loopback-only; put a TLS-terminating reverse proxy in front
+# for remote founders.
+#
+# Prerequisites (host):
+#   - the authscope-ope CLI for launch/revoke/doctor/recover flows
+#   - the governed runner binary at the OPE_RUNNER_PATH below
+#   - a managed, non-exportable workload signer reference resolvable as
+#     OPE_WORKLOAD_SIGNER_REF (HSM/TEE-backed in release mode)
+#
+# Start:  docker compose -f deploy/compose.yaml up -d
+# Logs:   docker compose -f deploy/compose.yaml logs -f ope
+
+services:
+  ope:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: authscope-ope:latest
+    # Loopback-only: the founder reaches the UI through an SSH tunnel
+    # or a TLS-terminating reverse proxy, never directly.
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    volumes:
+      # Dedicated owner-only data volume holding ope.db and the
+      # instance lock. Back this up; it is the instance's state.
+      - ope-data:/data:rw
+      # The governed runner binary, mounted read-only from the host.
+      - ${OPE_RUNNER_PATH_HOST:?set OPE_RUNNER_PATH_HOST}:/usr/local/bin/ope-runner:ro
+    environment:
+      OPE_MODE: release
+      OPE_BIND_ADDR: "127.0.0.1:8080"
+      OPE_DATA_DIR: /data
+      OPE_ROOT: /app
+      OPE_RUNNER_PATH: /usr/local/bin/ope-runner
+      AUTH_SCOPE_URL: ${AUTH_SCOPE_URL:?set AUTH_SCOPE_URL}
+      OPE_WORKSPACE_ID: ${OPE_WORKSPACE_ID:?set OPE_WORKSPACE_ID}
+      OPE_HOSTNAME: ${OPE_HOSTNAME:?set OPE_HOSTNAME}
+      OPE_ORIGIN: ${OPE_ORIGIN:?set OPE_ORIGIN}
+      OPE_RP_ID: ${OPE_RP_ID:?set OPE_RP_ID}
+      # Managed non-exportable signer reference (HSM/TEE handle, never
+      # key material). Release mode refuses to start without it.
+      OPE_WORKLOAD_SIGNER_REF: ${OPE_WORKLOAD_SIGNER_REF:?set OPE_WORKLOAD_SIGNER_REF}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  ope-data:
+    driver: local

@@ -31,6 +31,10 @@ var (
 	// the release-mode hardening checks (symlink, or group/world permission
 	// bits).
 	ErrUnsafeDataPath = errors.New("store: unsafe data path")
+	// ErrDatabaseLocked reports an exclusive open refused because another
+	// process holds the data-directory lock. The offline recovery command
+	// fails with this error while the server owns the database.
+	ErrDatabaseLocked = errors.New("store: database is locked by another process")
 )
 
 // Store is the read side of the presentation store plus transaction entry.
@@ -150,6 +154,18 @@ type Store interface {
 	// in the given state, oldest first. The reconciliation worker uses it
 	// to resume ambiguous revocations without re-issuing them.
 	ListRevocationIntents(ctx context.Context, workspaceID, state string) ([]RevocationIntentRecord, error)
+	// GetRecoveryIntent returns the durable offline recovery intent for
+	// an idempotency key, or ErrNotFound.
+	GetRecoveryIntent(ctx context.Context, workspaceID, idempotencyKey string) (RecoveryIntentRecord, error)
+	// GetRecoveryEvent returns one workspace-qualified recovery event,
+	// or ErrNotFound.
+	GetRecoveryEvent(ctx context.Context, workspaceID, eventID string) (RecoveryEventRecord, error)
+	// ListRecoveryEvents returns the non-secret recovery events of a
+	// workspace, newest first, capped at limit (zero means ten).
+	ListRecoveryEvents(ctx context.Context, workspaceID string, limit int) ([]RecoveryEventRecord, error)
+	// GetWorkerLease returns the server-owned reconciliation worker
+	// lease for an instance, or ErrNotFound when no lease row exists.
+	GetWorkerLease(ctx context.Context, instanceID string) (WorkerLeaseRecord, error)
 	// ListExpansionIntents returns the expansion decision intents of a
 	// workspace in the given state, oldest first. The reconciliation
 	// worker uses it to resume ambiguous decisions without re-issuing
@@ -404,6 +420,64 @@ type Tx interface {
 	// response returns only the original reference; it never mints a
 	// second result.
 	ConsumeCLIRevocationResult(ctx context.Context, workspaceID string, codeHash [32]byte, now time.Time) (string, string, error)
+	// PutRecoveryIntent inserts the durable local intent behind one
+	// offline recovery idempotency key. It is written before the upstream
+	// ContainWorkspace call so an ambiguous outcome reconciles by the
+	// same key. A duplicate idempotency key returns ErrConflict.
+	PutRecoveryIntent(ctx context.Context, rec RecoveryIntentRecord) error
+	// GetRecoveryIntent returns the durable recovery intent for an
+	// idempotency key, or ErrNotFound.
+	GetRecoveryIntent(ctx context.Context, workspaceID, idempotencyKey string) (RecoveryIntentRecord, error)
+	// SetRecoveryIntentAttestation records the digest of the signed
+	// containment attestation on a pending intent. It affects exactly
+	// one pending row; any other state returns ErrConflict.
+	SetRecoveryIntentAttestation(ctx context.Context, workspaceID, idempotencyKey, attestationDigest string, at time.Time) error
+	// SetRecoveryIntentContained moves a pending intent to contained
+	// after AuthScope acknowledged the workspace containment, recording
+	// the containment generation. It affects exactly one pending row.
+	SetRecoveryIntentContained(ctx context.Context, workspaceID, idempotencyKey string, generation int64, at time.Time) error
+	// SetRecoveryIntentVerifiedEmpty moves a contained intent to
+	// verified_empty after the authoritative ListActiveMissions view
+	// returned an empty list. It affects exactly one contained row.
+	SetRecoveryIntentVerifiedEmpty(ctx context.Context, workspaceID, idempotencyKey string, at time.Time) error
+	// SetRecoveryIntentCompleted moves a verified_empty intent to
+	// completed, recording the recovery event and the reset outcome. It
+	// affects exactly one verified_empty row.
+	SetRecoveryIntentCompleted(ctx context.Context, workspaceID, idempotencyKey, eventID string, revokedSessions, containedMissions int, bootstrapExpiresAt, at time.Time) error
+	// PutRecoveryEvent records the non-secret durable recovery event. A
+	// duplicate event ID returns ErrConflict. No recovery-key material
+	// is stored here.
+	PutRecoveryEvent(ctx context.Context, rec RecoveryEventRecord) error
+	// GetRecoveryEvent returns one workspace-qualified recovery event,
+	// or ErrNotFound.
+	GetRecoveryEvent(ctx context.Context, workspaceID, eventID string) (RecoveryEventRecord, error)
+	// GetWorkerLease returns the server-owned reconciliation worker
+	// lease for an instance, or ErrNotFound when no lease row exists.
+	GetWorkerLease(ctx context.Context, instanceID string) (WorkerLeaseRecord, error)
+	// RevokeAllSessions marks every unrevoked web session of a
+	// workspace revoked and returns the revoked count. It is the local
+	// half of offline recovery: every founder session dies at once.
+	RevokeAllSessions(ctx context.Context, workspaceID string) (int, error)
+	// ResetLaunchHandoffs deletes every CLI authorization, CLI
+	// revocation, and launch-exchange intent row of a workspace. These
+	// are one-use handoff records; after an offline recovery they are
+	// invalid and never resume.
+	ResetLaunchHandoffs(ctx context.Context, workspaceID string) error
+	// DeleteAllWebAuthnCredentials deletes every passkey public
+	// credential of a workspace and returns the deleted count. The
+	// founder re-enrolls credentials through the recovery bootstrap
+	// code.
+	DeleteAllWebAuthnCredentials(ctx context.Context, workspaceID string) (int, error)
+	// ConsumeOfflineRecoveryKey deletes a founder's offline recovery key
+	// hash. The key is one-use: recovery consumes it in the same
+	// transaction that resets authentication state. A missing key
+	// returns ErrNotFound.
+	ConsumeOfflineRecoveryKey(ctx context.Context, workspaceID, founderID string) error
+	// DeleteFounder removes a founder row. Offline recovery deletes the
+	// founder whose credentials were all revoked and deleted, so the
+	// fresh bootstrap code can re-enroll the workspace. Pass-scoped
+	// presentation state is untouched.
+	DeleteFounder(ctx context.Context, workspaceID, founderID string) error
 }
 
 // LaunchExchangeIntent is the durable reservation for one authorization
@@ -914,4 +988,67 @@ type CLIAuthorization struct {
 	ApprovedAt                *time.Time
 	ExpiresAt                 time.Time
 	CreatedAt                 time.Time
+}
+
+// Recovery intent states for RecoveryIntentRecord. The offline recovery
+// flow moves one step at a time: pending (intent persisted, containment
+// not yet acknowledged), contained (AuthScope acknowledged the bulk
+// containment), verified_empty (the authoritative active-mission list
+// came back empty), completed (local authentication state reset and the
+// recovery event recorded). A crash resumes from the recorded state.
+const (
+	RecoveryIntentPending       = "pending"
+	RecoveryIntentContained     = "contained"
+	RecoveryIntentVerifiedEmpty = "verified_empty"
+	RecoveryIntentCompleted     = "completed"
+)
+
+// RecoveryIntentRecord is the durable local intent behind one offline
+// recovery idempotency key. It is written before the upstream
+// ContainWorkspace call so an ambiguous outcome (timeout, dropped
+// response, crash) reconciles by the same key without ever re-containing
+// the workspace. Nonce is the hex of the 32-byte attestation nonce.
+type RecoveryIntentRecord struct {
+	WorkspaceID           string
+	IdempotencyKey        string
+	IntentID              string
+	CanonicalDigest       string
+	AttestationDigest     string
+	Nonce                 string
+	State                 string
+	ContainmentGeneration int64
+	RecoveryEventID       string
+	RevokedSessionCount   int
+	ContainedMissionCount int
+	BootstrapExpiresAt    time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
+// RecoveryEventRecord is the durable, non-secret record of one completed
+// offline recovery. It names the workspace, the founder, how many active
+// missions the bulk containment covered, and the digests binding the
+// event to the signed containment attestation and the fresh bootstrap
+// code. No recovery-key material is stored here.
+type RecoveryEventRecord struct {
+	WorkspaceID           string
+	EventID               string
+	FounderID             string
+	IdempotencyKey        string
+	ContainedMissionCount int
+	ContainmentGeneration int64
+	AttestationDigest     string
+	RecoveryProofDigest   string
+	BootstrapCodeHash     string
+	OccurredAt            time.Time
+}
+
+// WorkerLeaseRecord is the server-owned reconciliation worker lease for
+// one instance. The worker holds it while running so a second process
+// cannot own the same instance cursor.
+type WorkerLeaseRecord struct {
+	InstanceID  string
+	Owner       string
+	HeartbeatAt time.Time
+	ExpiresAt   time.Time
 }

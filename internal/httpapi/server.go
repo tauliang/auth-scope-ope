@@ -6,6 +6,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/config"
@@ -109,7 +110,28 @@ func New(deps Dependencies) http.Handler {
 	receiptRoutes(mux, deps)
 	cliRoutes(mux, deps)
 
-	return withSecurityHeaders(http.MaxBytesHandler(mux, maxBodyBytes))
+	api := http.MaxBytesHandler(mux, maxBodyBytes)
+	ui := spaHandler()
+	// The embedded web UI serves GET requests for non-API paths, with
+	// an index.html fallback for client-side routing. API paths keep
+	// their exact 404/405 semantics: the UI never shadows them.
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && isUIPath(r.URL.Path) {
+			ui.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+	return withSecurityHeaders(h)
+}
+
+// isUIPath reports whether p is served by the web UI rather than the
+// API: anything that is not an API, liveness, or readiness path.
+func isUIPath(p string) bool {
+	if p == "/healthz" || p == "/readyz" {
+		return false
+	}
+	return !strings.HasPrefix(p, "/api/")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
