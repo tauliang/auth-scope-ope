@@ -16,8 +16,10 @@ import (
 // maxBodyBytes bounds every JSON request body the local API accepts.
 const maxBodyBytes = 1 << 20
 
-// Dependencies wires the HTTP server. Later tasks add the AuthScope client
-// here.
+// Dependencies wires the HTTP server. Gate is the live upstream
+// compatibility gate; Authority is the gated AuthScope client later
+// services use. A nil Gate keeps the legacy contract-only readiness used
+// by tests; production always wires one.
 type Dependencies struct {
 	Config   config.Config
 	Contract coreapi.ContractReport
@@ -25,6 +27,11 @@ type Dependencies struct {
 	// Authn is the founder authentication service. It may be nil in tests
 	// that only exercise the pre-authentication surface.
 	Authn *authn.Service
+	// Gate is the live compatibility gate. Nil in tests that only
+	// exercise the contract surface.
+	Gate *coreapi.Gate
+	// Authority is the gated AuthScope client for later services.
+	Authority coreapi.Authority
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2
@@ -56,7 +63,7 @@ type BootstrapResponse struct {
 func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz(deps.Contract))
+	mux.HandleFunc("/readyz", handleReadyz(deps.Contract, deps.Gate))
 	mux.HandleFunc("/api/v1/bootstrap", handleBootstrap(deps))
 	authRoutes(mux, deps)
 
@@ -73,13 +80,25 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func handleReadyz(report coreapi.ContractReport) http.HandlerFunc {
+func handleReadyz(report coreapi.ContractReport, gate *coreapi.Gate) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if !report.Ready() {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 				"status":       "not_ready",
 				"core_version": report.CoreVersion,
 				"problems":     report.Problems,
+			})
+			return
+		}
+		// The live gate fails closed: readiness requires a successful
+		// verification no older than thirty seconds. A nil gate keeps
+		// the contract-only behavior used by tests; production always
+		// wires one.
+		if gate != nil && !gate.Healthy() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status":       "not_ready",
+				"core_version": report.CoreVersion,
+				"problems":     []string{"upstream compatibility not verified"},
 			})
 			return
 		}

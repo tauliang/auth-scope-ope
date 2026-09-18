@@ -39,6 +39,13 @@ var (
 	ErrInvalidInstanceID = errors.New("store: invalid instance ID")
 	// ErrEmptyWorkspaceID reports a missing workspace ID.
 	ErrEmptyWorkspaceID = errors.New("store: workspace ID is required")
+	// ErrIdentityDigestNotEmpty reports an instance binding that already
+	// carries a workload-identity digest. The digest starts empty at bind
+	// time and is attached exactly once by the compatibility gate.
+	ErrIdentityDigestNotEmpty = errors.New("store: workload identity digest must be empty at bind time")
+	// ErrInvalidIdentityDigest reports a workload-identity digest that is
+	// not a sha256: digest reference.
+	ErrInvalidIdentityDigest = errors.New("store: invalid workload identity digest")
 )
 
 // SessionCookiePrefix is the __Host- cookie prefix for OPE sessions. The
@@ -74,8 +81,35 @@ func ValidateInstance(rec InstanceRecord, mode string) error {
 	if rec.SessionCookieName != DeriveSessionCookieName(rec.InstanceID) {
 		return fmt.Errorf("%w: got %q", ErrInvalidCookieName, rec.SessionCookieName)
 	}
+	// The workload-identity digest is attached exactly once by the
+	// compatibility gate after bind; a binding record must start empty so
+	// a rebound instance cannot smuggle in an identity.
+	if rec.WorkloadIdentityDigest != "" {
+		return fmt.Errorf("%w: got %q", ErrIdentityDigestNotEmpty, rec.WorkloadIdentityDigest)
+	}
 	if rec.CreatedAt.IsZero() {
 		return errors.New("store: instance CreatedAt is required")
+	}
+	return nil
+}
+
+// ValidateWorkloadIdentityDigest checks that a digest is a non-empty
+// sha256: digest reference before it is attached to the instance record.
+func ValidateWorkloadIdentityDigest(digest string) error {
+	if digest == "" {
+		return fmt.Errorf("%w: empty", ErrInvalidIdentityDigest)
+	}
+	if !strings.HasPrefix(digest, "sha256:") {
+		return fmt.Errorf("%w: must start with %q", ErrInvalidIdentityDigest, "sha256:")
+	}
+	if len(digest) > 128 {
+		return fmt.Errorf("%w: too long", ErrInvalidIdentityDigest)
+	}
+	for _, r := range digest[len("sha256:"):] {
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '.' || r == '-' || r == '_' || r == ':' {
+			continue
+		}
+		return fmt.Errorf("%w: bad character %q", ErrInvalidIdentityDigest, r)
 	}
 	return nil
 }

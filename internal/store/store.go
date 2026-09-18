@@ -146,6 +146,12 @@ type InstanceRecord struct {
 	CreatedAt              time.Time
 }
 
+// HasWorkloadIdentity reports whether the stable workload-identity digest
+// has been attached to the instance record.
+func (r InstanceRecord) HasWorkloadIdentity() bool {
+	return r.WorkloadIdentityDigest != ""
+}
+
 // MissionPassRecord is the local presentation state of one mission pass.
 // StoreRevision is the local compare-and-swap token and increments on every
 // mutation; DraftVersion is the founder-visible proposal revision;

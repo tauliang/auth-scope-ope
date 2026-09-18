@@ -155,16 +155,9 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 // writeProblem renders an application/problem+json error. Titles and
 // details are generic: credential material, challenges, and tokens are
-// never reflected.
+// never reflected. It delegates to the shared problem writer.
 func writeProblem(w http.ResponseWriter, status int, title, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":   "about:blank",
-		"title":  title,
-		"status": status,
-		"detail": detail,
-	})
+	WriteProblem(w, status, title, detail)
 }
 
 // authnProblem maps service errors to problem responses. The mapping is

@@ -84,7 +84,7 @@ func VerifyVendoredContract(root string) ContractReport {
 	report.DigestMatch = true
 
 	var doc struct {
-		Paths map[string]map[string]any `yaml:"paths"`
+		Paths      map[string]map[string]any `yaml:"paths"`
 		Components struct {
 			Schemas         map[string]any `yaml:"schemas"`
 			SecuritySchemes map[string]any `yaml:"securitySchemes"`

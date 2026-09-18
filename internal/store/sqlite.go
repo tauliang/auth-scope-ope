@@ -292,8 +292,9 @@ func attachWorkloadIdentity(ctx context.Context, c dbConn, expected, digest stri
 	if expected != "" {
 		return fmt.Errorf("store: attach workload identity: expected must be empty, got %q", expected)
 	}
-	if digest == "" {
-		return fmt.Errorf("store: attach workload identity: digest is required")
+	// Fail closed on a malformed digest before touching the singleton row.
+	if err := ValidateWorkloadIdentityDigest(digest); err != nil {
+		return fmt.Errorf("store: attach workload identity: %w", err)
 	}
 	res, err := c.ExecContext(ctx,
 		`UPDATE instance SET workload_identity_digest = ? WHERE id = 1 AND workload_identity_digest = ''`, digest)

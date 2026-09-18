@@ -1,0 +1,6 @@
+{
+  "missions": [
+    {"mission_ref": "mission-1", "state": "active", "workspace_id": "ws-test"},
+    {"mission_ref": "mission-2", "state": "active", "workspace_id": "ws-test"}
+  ]
+}

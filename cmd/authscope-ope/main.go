@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
+	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -62,6 +64,31 @@ func runServe() error {
 		}
 	}()
 	ctx := context.Background()
+	signer, err := resolveWorkloadSigner(cfg)
+	if err != nil {
+		return err
+	}
+	client, err := coreapi.NewClient(cfg.AuthScopeURL, nil, signer, cfg.Mode)
+	if err != nil {
+		return fmt.Errorf("authscope client: %w", err)
+	}
+	// Live compatibility gate: verify the deployed core and the
+	// transport-authenticated workload identity before serving, attach
+	// the stable identity digest exactly once, and keep re-verifying.
+	// An identity mismatch is fatal; any other verification failure
+	// leaves /readyz unhealthy until a later check succeeds.
+	gate := coreapi.NewGate(client, st)
+	if err := gate.Verify(ctx); err != nil {
+		if errors.Is(err, coreapi.ErrIdentityMismatch) {
+			return fmt.Errorf("workload identity mismatch: %w", err)
+		}
+		log.Printf("WARNING: upstream compatibility not verified: %v; /readyz stays unhealthy until verification succeeds", err)
+	} else {
+		log.Printf("upstream compatibility verified; workload identity %s", gate.IdentityDigest())
+	}
+	gate.StartRefresher(ctx, 10*time.Second, log.Printf)
+	gated := coreapi.NewGatedAuthority(client, gate)
+
 	verifier, err := authn.NewWebAuthnVerifier(cfg.RPID, cfg.Origin)
 	if err != nil {
 		return fmt.Errorf("webauthn verifier: %w", err)
@@ -78,9 +105,27 @@ func runServe() error {
 	} else if code != "" {
 		fmt.Printf("Founder enrollment is open. Enter this one-time code in the browser:\n\n  %s\n\nThe code expires in ten minutes and is never shown again.\n", code)
 	}
-	handler := httpapi.New(httpapi.Dependencies{Config: cfg, Contract: report, Store: st, Authn: authnSvc})
+	handler := httpapi.New(httpapi.Dependencies{
+		Config: cfg, Contract: report, Store: st, Authn: authnSvc,
+		Gate: gate, Authority: gated,
+	})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)
+}
+
+// resolveWorkloadSigner resolves the non-exportable workload signer for
+// the AuthScope transport and decision attestations. Release mode fails
+// closed: HSM/TEE-backed reference resolution lands in a later task, so
+// any configured reference is unresolvable by this build. Development with
+// no reference uses an ephemeral in-memory signer, which is generated
+// fresh on every start, clearly marked dev-only, and must never be used
+// in release mode.
+func resolveWorkloadSigner(cfg config.Config) (identity.Signer, error) {
+	if cfg.Mode == "release" || cfg.WorkloadSignerRef != "" {
+		return nil, fmt.Errorf("%w: %q", identity.ErrUnresolvableSigner, cfg.WorkloadSignerRef)
+	}
+	log.Printf("WARNING: using an ephemeral dev-only workload signer; it is generated fresh on every start and must never be used in release mode")
+	return identity.NewEphemeralSigner(), nil
 }
 
 // bindInstance opens the presentation store and establishes the immutable
