@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -255,8 +256,13 @@ func (s *sqliteStore) WithTx(ctx context.Context, fn func(Tx) error) error {
 	}()
 	stx := &sqliteTx{tx: tx, mode: s.mode}
 	if err := fn(stx); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("store: rollback after %v: %w", err, rbErr)
+		// When the context is canceled mid-transaction the driver may
+		// already have rolled the transaction back, in which case the
+		// explicit rollback reports sql.ErrTxDone. That is not a new
+		// failure: return the original error so its chain (for example
+		// context.DeadlineExceeded) stays intact for errors.Is callers.
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			return fmt.Errorf("store: rollback after %w: %w", err, rbErr)
 		}
 		return err
 	}

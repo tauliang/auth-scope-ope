@@ -439,6 +439,13 @@ func (s *Service) ResetOffline(ctx context.Context, req RecoveryRequest) (Recove
 		if err := s.store.WithTx(ctx, func(tx store.Tx) error {
 			return tx.SetRecoveryIntentVerifiedEmpty(ctx, inst.WorkspaceID, key, s.clock().UTC())
 		}); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				// A concurrent reset drove this intent out of contained
+				// while we worked: report in-progress so the caller
+				// retries into the completed replay instead of
+				// surfacing a store conflict.
+				return RecoveryResult{}, ErrRecoveryInProgress
+			}
 			return RecoveryResult{}, fmt.Errorf("recovery: record empty list: %w", err)
 		}
 		intent.State = store.RecoveryIntentVerifiedEmpty
@@ -655,6 +662,12 @@ func (s *Service) resetLocalState(ctx context.Context, inst store.InstanceRecord
 	})
 	if err != nil {
 		zeroBytes(code)
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			// A concurrent reset's final transaction committed first,
+			// consuming the recovery key and completing the intent:
+			// this reset is the loser of the race.
+			return RecoveryResult{}, ErrRecoveryInProgress
+		}
 		return RecoveryResult{}, fmt.Errorf("recovery: local reset: %w", err)
 	}
 	// The raw code is delivered to the caller exactly once and never
