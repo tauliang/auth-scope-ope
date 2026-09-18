@@ -35,7 +35,11 @@ services:
       - ${OPE_RUNNER_PATH_HOST:?set OPE_RUNNER_PATH_HOST}:/usr/local/bin/ope-runner:ro
     environment:
       OPE_MODE: release
-      OPE_BIND_ADDR: "127.0.0.1:8080"
+      # Bind all interfaces inside the container; the published port
+      # stays loopback-only on the host (see ports above). Binding the
+      # container loopback here would make the published port
+      # unreachable, because Docker forwards to the container's eth0.
+      OPE_BIND_ADDR: "0.0.0.0:8080"
       OPE_DATA_DIR: /data
       OPE_ROOT: /app
       OPE_RUNNER_PATH: /usr/local/bin/ope-runner

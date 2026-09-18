@@ -55,21 +55,35 @@ One GitHub issue becomes one expiring Mission Pass, one governed coding-agent ru
 
 ## Running the demo
 
-The demo in this branch runs against the same fake backend the e2e suite uses, so the three screens are fully navigable without real AuthScope or GitHub credentials:
+The demo runs as a single self-contained container: the image embeds
+the web UI, runs in development mode, and uses the same fake-backend
+posture as the e2e suite, so the three screens are fully navigable
+without real AuthScope or GitHub credentials.
 
 ```sh
-export GOSUMDB=off
-go build -o /tmp/authscope-ope ./cmd/authscope-ope
-OPE_MODE=development AUTH_SCOPE_URL=http://127.0.0.1:9 \
-  OPE_BIND_ADDR="127.0.0.1:18080" OPE_DATA_DIR=/tmp/ope-demo-data \
-  OPE_ROOT="$PWD" OPE_WORKSPACE_ID="ws-demo" OPE_HOSTNAME="demo.local" \
-  OPE_ORIGIN="http://localhost:15173" OPE_RP_ID=localhost \
-  /tmp/authscope-ope serve &
-pnpm --dir web install --frozen-lockfile
-OPE_API="http://127.0.0.1:18080" pnpm --dir web exec vite --port 15173
+docker compose -f demo/compose.yaml up -d --build
 ```
 
-Then open http://localhost:15173/ and walk the three screens: Connect, Authorize, Mission.
+Then open http://localhost:8080 and walk the three screens: Connect,
+Authorize, Mission.
+
+The one-time bootstrap code is printed to the container log at
+startup; enter it in the browser to begin founder enrollment:
+
+```sh
+docker compose -f demo/compose.yaml logs ope-demo
+```
+
+Useful commands:
+
+```sh
+docker compose -f demo/compose.yaml logs -f ope-demo   # follow the log
+docker compose -f demo/compose.yaml down                # stop, keep data
+docker compose -f demo/compose.yaml down -v             # stop and wipe for a fresh bootstrap
+```
+
+For a real deployment (release mode, real AuthScope, HSM-backed
+signer), see [deploy/README.md](../deploy/README.md) instead.
 
 ## Demo video
 
