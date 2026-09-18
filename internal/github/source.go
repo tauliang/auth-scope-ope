@@ -228,7 +228,7 @@ func checkIssueSnapshot(workspaceID, bindingID string, issueNumber int64, snap c
 		return fmt.Errorf("%w: missing snapshot time", ErrInvalidInput)
 	}
 	snapshotAt := time.Unix(snap.SnapshotAt, 0).UTC()
-	if snapshotAt.After(now.Add(5*time.Minute)) {
+	if snapshotAt.After(now.Add(5 * time.Minute)) {
 		return fmt.Errorf("%w: snapshot from the future", ErrInvalidInput)
 	}
 	return nil

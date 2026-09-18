@@ -8,6 +8,7 @@ import {
   githubCompletionPath,
 } from './features/connect/GitHubConnection';
 import IssuePicker from './features/authorize/IssuePicker';
+import { MissionPassAuthorize } from './features/authorize/MissionPassReview';
 
 type LoadState =
   | { kind: 'loading' }
@@ -69,14 +70,12 @@ function AuthenticatedApp({ bootstrap, csrfToken }: { bootstrap: BootstrapRespon
       </section>
       <GitHubConnectionStart onConnected={setConnection} />
       <IssuePicker connection={connection} onAuthorize={setAuthorized} />
-      {authorized && (
-        <section aria-label="authorized issue">
-          <h2>Authorized issue</h2>
-          <p>
-            Issue #{authorized.issue_number} imported from {authorized.repository_full_name}. The
-            authorize flow continues from this snapshot.
-          </p>
-        </section>
+      {authorized && connection && (
+        <MissionPassAuthorize
+          connectionId={connection.connection_id}
+          issueNumber={authorized.issue_number}
+          onBack={() => setAuthorized(null)}
+        />
       )}
     </main>
   );

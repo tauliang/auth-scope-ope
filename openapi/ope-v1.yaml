@@ -440,6 +440,171 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/drafts:
+    post:
+      operationId: missionPassDraftCreate
+      summary: Shape and create the exact AuthScope proposal
+      description: >
+        Refreshes the trusted issue snapshot and workflow posture, shapes
+        the mission inside the fixed template, creates the exact upstream
+        proposal, and persists the returned values byte-for-byte for
+        founder review. Only the two editable limits are founder-supplied;
+        everything else derives from the trusted snapshot and the fixed
+        agent kit. Requires a founder session, CSRF token, and an
+        Idempotency-Key header. Retrying with the same key returns the
+        same pass instead of duplicating it. A 202 means the upstream
+        outcome stayed ambiguous; the pass carries reconciliation
+        "pending" and the same request can be retried.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionPassDraftCreateRequest'
+      responses:
+        '201':
+          description: Draft created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '200':
+          description: Idempotent replay of an already-created draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Connection not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: A request with this idempotency key is in flight.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '422':
+          description: Upstream draft outside the fixed template.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/draft:
+    put:
+      operationId: missionPassDraftRevise
+      summary: Narrow the two editable draft limits
+      description: >
+        Applies the only two founder edits to a draft: an earlier expiry
+        and a lower aggregate-cost ceiling. Every other field is
+        immutable; attempts to edit protected fields fail with 422, and
+        widening edits fail with 400. A valid edit reruns shaping and
+        creates a new upstream proposal with a fresh idempotency key,
+        writing an immutable revision with draft_version + 1. Requires a
+        founder session, CSRF token, and an Idempotency-Key header. A 202
+        means the upstream outcome stayed ambiguous; the pass carries
+        reconciliation "pending" and the same request can be retried.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionPassDraftReviseRequest'
+      responses:
+        '200':
+          description: Draft revised.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request, or a widening edit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: Revision conflict or stale source.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '422':
+          description: Protected field edit, or upstream outside the template.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}:
+    get:
+      operationId: missionPassGet
+      summary: Read a mission pass for review
+      description: >
+        Returns the immutable proposal revision plus the trusted snapshot
+        content it was shaped from, for founder review. Requires a founder
+        session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pass review payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -711,3 +876,103 @@ components:
           $ref: '#/components/schemas/GitHubIssueSnapshot'
         posture:
           $ref: '#/components/schemas/GitHubPosture'
+    MissionPassDraftCreateRequest:
+      type: object
+      required: [connection_id, issue_number, expires_at, max_aggregate_cost_micros]
+      properties:
+        connection_id:
+          type: string
+        issue_number:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassDraftReviseRequest:
+      type: object
+      required: [expected_store_revision, expected_draft_version, expires_at, max_aggregate_cost_micros]
+      properties:
+        expected_store_revision:
+          type: integer
+        expected_draft_version:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassLimits:
+      type: object
+      required: [expires_at, max_aggregate_cost_micros]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+        max_aggregate_cost_micros:
+          type: integer
+    MissionPassReview:
+      type: object
+      required:
+        [workspace_id, pass_id, store_revision, draft_version,
+         authscope_mission_version, proposal_id, proposal_digest,
+         invocation_digest, agent_kit_id, agent_kit_version,
+         runner_arguments, limits, state, reconciliation, connection_id,
+         issue_number, repository_name, objective, acceptance_criteria]
+      properties:
+        workspace_id:
+          type: string
+        pass_id:
+          type: string
+        store_revision:
+          type: integer
+        draft_version:
+          type: integer
+        authscope_mission_version:
+          type: integer
+        proposal_id:
+          type: string
+        proposal_digest:
+          type: string
+        approved_proposal_digest:
+          type: string
+        source_revision:
+          type: string
+        source_digest:
+          type: string
+        base_sha:
+          type: string
+        mission_branch:
+          type: string
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
+        invocation_digest:
+          type: string
+        limits:
+          $ref: '#/components/schemas/MissionPassLimits'
+        state:
+          type: string
+          enum: [draft, approved, launching, running, awaiting_expansion, outcome_pending, completed, failed, revoked, expired]
+        reconciliation:
+          type: string
+          enum: [settled, pending]
+        connection_id:
+          type: string
+        issue_number:
+          type: integer
+        repository_name:
+          type: string
+        objective:
+          type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+        shaped_draft:
+          type: object

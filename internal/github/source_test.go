@@ -42,17 +42,17 @@ func testBinding() coreapi.RepositoryBinding {
 
 func testSnapshot() coreapi.GitHubIssueSnapshot {
 	return coreapi.GitHubIssueSnapshot{
-		WorkspaceID:      "ws-1",
-		BindingID:        "binding-1",
-		IssueNumber:      42,
-		Title:            "Add retries to the deploy step",
-		Body:             "Deploy flakes.\n\n- [ ] retry with backoff\n- [x] keep logs\n- [ ] retry with backoff",
-		State:            "open",
-		BaseRef:          "main",
-		BaseSHA:          "0123456789abcdef0123456789abcdef01234567",
-		SourceRevision:   "rev-20260917-001",
-		CanonicalDigest:  "sha256:" + strings.Repeat("ab", 32),
-		SnapshotAt:       time.Now().UTC().Unix(),
+		WorkspaceID:     "ws-1",
+		BindingID:       "binding-1",
+		IssueNumber:     42,
+		Title:           "Add retries to the deploy step",
+		Body:            "Deploy flakes.\n\n- [ ] retry with backoff\n- [x] keep logs\n- [ ] retry with backoff",
+		State:           "open",
+		BaseRef:         "main",
+		BaseSHA:         "0123456789abcdef0123456789abcdef01234567",
+		SourceRevision:  "rev-20260917-001",
+		CanonicalDigest: "sha256:" + strings.Repeat("ab", 32),
+		SnapshotAt:      time.Now().UTC().Unix(),
 	}
 }
 
@@ -190,11 +190,11 @@ func TestCheckPosturePersistsMetadataOnly(t *testing.T) {
 	auth := &fakeAuthority{
 		binding: testBinding(),
 		posture: coreapi.WorkflowPosture{
-			BindingID:           "binding-1",
-			Ref:                 "main",
-			Posture:             "clean",
-			WorkflowsInspected:  3,
-			Findings:            []coreapi.WorkflowFinding{},
+			BindingID:          "binding-1",
+			Ref:                "main",
+			Posture:            "clean",
+			WorkflowsInspected: 3,
+			Findings:           []coreapi.WorkflowFinding{},
 		},
 	}
 	s := testSource(t, st, auth)

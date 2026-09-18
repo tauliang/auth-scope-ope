@@ -115,6 +115,53 @@ export interface HealthResponse {
   status: "ok";
 }
 
+export interface MissionPassDraftCreateRequest {
+  connection_id: string;
+  expires_at: string;
+  issue_number: number;
+  max_aggregate_cost_micros: number;
+}
+
+export interface MissionPassDraftReviseRequest {
+  expected_draft_version: number;
+  expected_store_revision: number;
+  expires_at: string;
+  max_aggregate_cost_micros: number;
+}
+
+export interface MissionPassLimits {
+  expires_at: string;
+  max_aggregate_cost_micros: number;
+}
+
+export interface MissionPassReview {
+  acceptance_criteria: string[];
+  agent_kit_id: string;
+  agent_kit_version: string;
+  approved_proposal_digest?: string;
+  authscope_mission_version: number;
+  base_sha?: string;
+  connection_id: string;
+  draft_version: number;
+  invocation_digest: string;
+  issue_number: number;
+  limits: MissionPassLimits;
+  mission_branch?: string;
+  objective: string;
+  pass_id: string;
+  proposal_digest: string;
+  proposal_id: string;
+  reconciliation: "settled" | "pending";
+  repository_name: string;
+  runner_arguments: string[];
+  shaped_draft?: Record<string, never>;
+  source_digest?: string;
+  source_revision?: string;
+  state: "draft" | "approved" | "launching" | "running" | "awaiting_expansion" | "outcome_pending" | "completed" | "failed" | "revoked" | "expired";
+  store_revision: number;
+  workspace_id: string;
+}
+
 export interface ProblemResponse {
   detail?: string;
   status: number;

@@ -83,6 +83,25 @@ type Store interface {
 	// LatestWorkflowPosture returns the most recently checked posture for a
 	// connection, or ErrNotFound when none was ever inspected.
 	LatestWorkflowPosture(ctx context.Context, workspaceID, connectionID string) (WorkflowPostureRecord, error)
+	// ClaimMissionPassRequestKey records (workspace, idempotency key) ->
+	// pass for a draft-open request. It is insert-or-ignore: it returns
+	// the pass ID that owns the key, which may belong to an earlier
+	// racing request with the same key.
+	ClaimMissionPassRequestKey(ctx context.Context, workspaceID, idempotencyKey, passID string) (string, error)
+	// GetMissionPassIDByRequestKey returns the pass ID owning a
+	// draft-open idempotency key, or "" when the key was never claimed.
+	GetMissionPassIDByRequestKey(ctx context.Context, workspaceID, idempotencyKey string) (string, error)
+	// DeleteMissionPassRequestKey removes a key mapping. It is only
+	// called when no pass row exists for the mapped pass: releasing a
+	// failed draft-open attempt's key, or reclaiming a mapping whose
+	// owner died without persisting. It never removes a mapping that a
+	// live attempt might still persist under.
+	DeleteMissionPassRequestKey(ctx context.Context, workspaceID, idempotencyKey string) error
+	// GetMissionPassRequestKeyClaimedAt returns when a draft-open
+	// idempotency key was claimed, or ErrNotFound when the key was never
+	// claimed. It lets the service tell a still-running owner apart from
+	// a mapping whose owner died without persisting.
+	GetMissionPassRequestKeyClaimedAt(ctx context.Context, workspaceID, idempotencyKey string) (time.Time, error)
 	// Close releases the database connection.
 	Close() error
 }
@@ -198,14 +217,40 @@ func (r InstanceRecord) HasWorkloadIdentity() bool {
 // StoreRevision is the local compare-and-swap token and increments on every
 // mutation; DraftVersion is the founder-visible proposal revision;
 // AuthScopeMissionVersion is the upstream authority version and changes only
-// from authenticated upstream results.
+// from authenticated upstream results. Task 6 adds the exact upstream
+// proposal fields: AuthScope's returned proposal ID, algorithm-tagged
+// proposal and invocation digests, fixed agent-kit identity, ordered runner
+// arguments, pinned source identifiers, the generated mission branch, and
+// the two editable limits. ApprovedProposalDigest stays empty until
+// approval copies the approved value. Reconciliation tracks whether the
+// last upstream proposal mutation has a known outcome.
 type MissionPassRecord struct {
 	WorkspaceID             string
 	PassID                  string
 	StoreRevision           int64
 	DraftVersion            int64
 	AuthScopeMissionVersion int64
+	ConnectionID            string
+	IssueNumber             int64
+	RepositoryName          string
+	ProposalID              string
+	ProposalDigest          string
+	ApprovedProposalDigest  string
+	SourceRevision          string
+	SourceDigest            string
+	BaseSHA                 string
+	MissionBranch           string
+	AgentKitID              string
+	AgentKitVersion         string
+	RunnerArguments         []string
+	InvocationDigest        string
+	ExpiresAt               time.Time
+	MaxAggregateCostMicros  int64
+	Objective               string
+	AcceptanceCriteria      []string
+	ShapedDraftJSON         string
 	State                   string
+	Reconciliation          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 }
@@ -245,16 +290,16 @@ type ConnectionRecord struct {
 // it lives only in a bounded in-memory cache until finish, restart, or
 // expiry.
 type GitHubHandoffRecord struct {
-	WorkspaceID        string
-	HandoffID          string
-	SessionID          string
-	StateHash          string
-	UpstreamHandoffID  string
-	BindingCodeDigest  string
-	AuthScopeOrigin    string
-	ExpiresAt          time.Time
-	CallbackAt         *time.Time
-	ConsumedAt         *time.Time
+	WorkspaceID       string
+	HandoffID         string
+	SessionID         string
+	StateHash         string
+	UpstreamHandoffID string
+	BindingCodeDigest string
+	AuthScopeOrigin   string
+	ExpiresAt         time.Time
+	CallbackAt        *time.Time
+	ConsumedAt        *time.Time
 }
 
 // WorkflowPostureRecord is one persisted workflow-posture inspection. Only

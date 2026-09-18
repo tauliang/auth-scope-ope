@@ -14,6 +14,9 @@ import type {
   GitHubConnection,
   GitHubFinishRequest,
   GitHubIssueResponse,
+  MissionPassDraftCreateRequest,
+  MissionPassDraftReviseRequest,
+  MissionPassReview,
   ProblemResponse,
   SessionResponse,
 } from './generated';
@@ -67,11 +70,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-// postJson performs a same-origin JSON POST. The server requires exactly
-// application/json. When a session CSRF token is held in memory it is
-// attached as X-CSRF-Token; extra headers (such as Idempotency-Key) may be
-// supplied per call.
-function postJson<T>(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+// jsonRequest performs a same-origin JSON request with a body, attaching
+// the session CSRF token when held. Used by state-changing calls.
+function jsonRequest<T>(
+  method: string,
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (csrfToken !== null) {
     headers['X-CSRF-Token'] = csrfToken;
@@ -81,11 +87,15 @@ function postJson<T>(path: string, body: unknown, extraHeaders?: Record<string, 
       headers[name] = value;
     }
   }
-  return request<T>(path, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  return request<T>(path, { method, headers, body: JSON.stringify(body) });
+}
+
+// postJson performs a same-origin JSON POST. The server requires exactly
+// application/json. When a session CSRF token is held in memory it is
+// attached as X-CSRF-Token; extra headers (such as Idempotency-Key) may be
+// supplied per call.
+function postJson<T>(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  return jsonRequest<T>('POST', path, body, extraHeaders);
 }
 
 // csrfToken is the session-bound CSRF token held in memory for the page
@@ -197,4 +207,39 @@ export function githubIssue(connectionId: string, issueNumber: number): Promise<
   return request<GitHubIssueResponse>(
     `/api/v1/connections/github/${encodeURIComponent(connectionId)}/issues/${issueNumber}`,
   );
+}
+
+// createMissionPassDraft shapes and creates the exact AuthScope proposal
+// for one issue, returning the review payload. The same idempotency key
+// retried returns the same pass instead of duplicating it. A 202 payload
+// carries reconciliation "pending": the upstream outcome stayed
+// ambiguous and the same request can be retried.
+export function createMissionPassDraft(
+  body: MissionPassDraftCreateRequest,
+  idempotencyKey?: string,
+): Promise<MissionPassReview> {
+  return postJson<MissionPassReview>('/api/v1/mission-passes/drafts', body, {
+    'Idempotency-Key': idempotencyKey ?? newIdempotencyKey(),
+  });
+}
+
+// reviseMissionPassDraft narrows the two editable draft limits (earlier
+// expiry, lower aggregate budget) and returns the new immutable
+// revision. Any other edit is rejected by the server.
+export function reviseMissionPassDraft(
+  passId: string,
+  body: MissionPassDraftReviseRequest,
+  idempotencyKey?: string,
+): Promise<MissionPassReview> {
+  return jsonRequest<MissionPassReview>(
+    'PUT',
+    `/api/v1/mission-passes/${encodeURIComponent(passId)}/draft`,
+    body,
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// fetchMissionPass reads one mission pass for founder review.
+export function fetchMissionPass(passId: string): Promise<MissionPassReview> {
+  return request<MissionPassReview>(`/api/v1/mission-passes/${encodeURIComponent(passId)}`);
 }

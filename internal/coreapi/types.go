@@ -266,13 +266,24 @@ type ShapeMissionRequest struct {
 	RequestedRoles []string `json:"requested_roles,omitempty"`
 }
 
-// MissionDraft is the shaped, reviewable draft with its digests.
+// MissionDraft is the shaped, reviewable draft with its digests. The
+// invocation fields are fixed by AuthScope during shaping: the exact
+// agent-kit ID and version, the ordered runner argument array, and the
+// algorithm-tagged invocation digest over them. OPE validates the shaped
+// draft against its fixed local template and never reshapes authority
+// itself.
 type MissionDraft struct {
-	ProposalDigest string          `json:"proposal_digest"`
-	DecisionDigest string          `json:"decision_digest"`
-	CanonicalDraft json.RawMessage `json:"canonical_draft"`
-	ShapedAt       int64           `json:"shaped_at"`
-	WorkspaceID    string          `json:"workspace_id"`
+	ProposalDigest   string          `json:"proposal_digest"`
+	InvocationDigest string          `json:"invocation_digest"`
+	AgentKitID       string          `json:"agent_kit_id"`
+	AgentKitVersion  string          `json:"agent_kit_version"`
+	RunnerArguments  []string        `json:"runner_arguments"`
+	DecisionDigest   string          `json:"decision_digest"`
+	BudgetMicros     int64           `json:"budget_micros"`
+	TTLSeconds       int64           `json:"ttl_seconds"`
+	CanonicalDraft   json.RawMessage `json:"canonical_draft"`
+	ShapedAt         int64           `json:"shaped_at"`
+	WorkspaceID      string          `json:"workspace_id"`
 }
 
 // CreateProposalRequest creates an upstream mission proposal.
@@ -286,13 +297,23 @@ type CreateProposalRequest struct {
 	IdempotencyKey   string   `json:"idempotency_key"`
 }
 
-// Proposal is the created upstream mission proposal.
+// Proposal is the created upstream mission proposal. The proposal digest
+// and invocation digest are the exact algorithm-tagged canonical digests
+// AuthScope returned; OPE stores them byte-for-byte and never computes a
+// substitute authority digest. The proposal digest covers the invocation
+// digest: the proposal must carry the exact invocation digest the shaping
+// fixed.
 type Proposal struct {
-	ProposalID     string `json:"proposal_id"`
-	Status         string `json:"status"`
-	WorkspaceID    string `json:"workspace_id"`
-	DecisionDigest string `json:"decision_digest"`
-	CreatedAt      int64  `json:"created_at"`
+	ProposalID       string   `json:"proposal_id"`
+	ProposalDigest   string   `json:"proposal_digest"`
+	InvocationDigest string   `json:"invocation_digest"`
+	AgentKitID       string   `json:"agent_kit_id"`
+	AgentKitVersion  string   `json:"agent_kit_version"`
+	RunnerArguments  []string `json:"runner_arguments"`
+	Status           string   `json:"status"`
+	WorkspaceID      string   `json:"workspace_id"`
+	DecisionDigest   string   `json:"decision_digest"`
+	CreatedAt        int64    `json:"created_at"`
 }
 
 // LaunchRequest prepares a governed launch of an approved mission.

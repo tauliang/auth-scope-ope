@@ -91,12 +91,12 @@ func testStore(t *testing.T) store.Store {
 func testHandoff(t *testing.T, st store.Store, auth coreapi.Authority) *Handoff {
 	t.Helper()
 	h, err := NewHandoff(HandoffConfig{
-		Store:            st,
-		Authority:        auth,
-		AuthScopeOrigin:  "https://authscope.local",
-		CompletionPath:   "/connect/github/done",
-		Clock:            func() time.Time { return time.Now().UTC() },
-		UpstreamTimeout:  time.Second,
+		Store:           st,
+		Authority:       auth,
+		AuthScopeOrigin: "https://authscope.local",
+		CompletionPath:  "/connect/github/done",
+		Clock:           func() time.Time { return time.Now().UTC() },
+		UpstreamTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatalf("NewHandoff: %v", err)

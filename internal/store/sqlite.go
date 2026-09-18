@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -33,6 +33,8 @@ var migrations = []struct {
 	{"001_initial", "migrations/001_initial.sql"},
 	{"002_authn", "migrations/002_authn.sql"},
 	{"003_github", "migrations/003_github.sql"},
+	{"004_mission_pass_proposal", "migrations/004_mission_pass_proposal.sql"},
+	{"005_mission_pass_request_keys", "migrations/005_mission_pass_request_keys.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -201,6 +203,64 @@ func (s *sqliteStore) GetInstance(ctx context.Context) (InstanceRecord, error) {
 
 func (s *sqliteStore) GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error) {
 	return getMissionPass(ctx, s.db, workspaceID, passID)
+}
+
+func (s *sqliteStore) ClaimMissionPassRequestKey(ctx context.Context, workspaceID, idempotencyKey, passID string) (string, error) {
+	if workspaceID == "" || idempotencyKey == "" || passID == "" {
+		return "", fmt.Errorf("store: claim mission pass request key: workspace, key, and pass are required")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO mission_pass_request_keys
+		(workspace_id, idempotency_key, pass_id, created_at) VALUES (?, ?, ?, ?)`,
+		workspaceID, idempotencyKey, passID, formatTime(time.Now()))
+	if err != nil {
+		return "", fmt.Errorf("store: claim mission pass request key: %w", err)
+	}
+	var winner string
+	err = s.db.QueryRowContext(ctx, `SELECT pass_id FROM mission_pass_request_keys
+		WHERE workspace_id = ? AND idempotency_key = ?`, workspaceID, idempotencyKey).Scan(&winner)
+	if err != nil {
+		return "", fmt.Errorf("store: claim mission pass request key: %w", err)
+	}
+	return winner, nil
+}
+
+func (s *sqliteStore) GetMissionPassIDByRequestKey(ctx context.Context, workspaceID, idempotencyKey string) (string, error) {
+	var passID string
+	err := s.db.QueryRowContext(ctx, `SELECT pass_id FROM mission_pass_request_keys
+		WHERE workspace_id = ? AND idempotency_key = ?`, workspaceID, idempotencyKey).Scan(&passID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: get mission pass request key: %w", err)
+	}
+	return passID, nil
+}
+
+func (s *sqliteStore) DeleteMissionPassRequestKey(ctx context.Context, workspaceID, idempotencyKey string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM mission_pass_request_keys
+		WHERE workspace_id = ? AND idempotency_key = ?`, workspaceID, idempotencyKey)
+	if err != nil {
+		return fmt.Errorf("store: delete mission pass request key: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) GetMissionPassRequestKeyClaimedAt(ctx context.Context, workspaceID, idempotencyKey string) (time.Time, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT created_at FROM mission_pass_request_keys
+		WHERE workspace_id = ? AND idempotency_key = ?`, workspaceID, idempotencyKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return time.Time{}, fmt.Errorf("%w: request key %q", ErrNotFound, idempotencyKey)
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: get mission pass request key claimed at: %w", err)
+	}
+	claimedAt, err := parseTime(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: get mission pass request key claimed at: %w", err)
+	}
+	return claimedAt, nil
 }
 
 func (s *sqliteStore) ListMissionEvents(ctx context.Context, workspaceID, passID, afterCursor string, limit int) ([]MissionEventRecord, error) {
@@ -675,15 +735,50 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 	if expectedStoreRevision < 0 {
 		return fmt.Errorf("store: put mission pass: negative expected revision")
 	}
+	runnerArgs, err := encodeStringSlice(rec.RunnerArguments)
+	if err != nil {
+		return fmt.Errorf("store: put mission pass: %w", err)
+	}
+	criteria, err := encodeStringSlice(rec.AcceptanceCriteria)
+	if err != nil {
+		return fmt.Errorf("store: put mission pass: %w", err)
+	}
 	now := formatTime(time.Now())
 	res, err := c.ExecContext(ctx, `UPDATE mission_passes
 		SET store_revision = store_revision + 1,
 		    draft_version = ?,
 		    authscope_mission_version = ?,
+		    connection_id = ?,
+		    issue_number = ?,
+		    repository_name = ?,
+		    proposal_id = ?,
+		    proposal_digest = ?,
+		    approved_proposal_digest = ?,
+		    source_revision = ?,
+		    source_digest = ?,
+		    base_sha = ?,
+		    mission_branch = ?,
+		    agent_kit_id = ?,
+		    agent_kit_version = ?,
+		    runner_arguments = ?,
+		    invocation_digest = ?,
+		    expires_at = ?,
+		    max_aggregate_cost_micros = ?,
+		    objective = ?,
+		    acceptance_criteria = ?,
+		    shaped_draft_json = ?,
 		    state = ?,
+		    reconciliation = ?,
 		    updated_at = ?
 		WHERE workspace_id = ? AND pass_id = ? AND store_revision = ?`,
-		rec.DraftVersion, rec.AuthScopeMissionVersion, rec.State, now,
+		rec.DraftVersion, rec.AuthScopeMissionVersion,
+		rec.ConnectionID, rec.IssueNumber, rec.RepositoryName,
+		rec.ProposalID, rec.ProposalDigest, rec.ApprovedProposalDigest,
+		rec.SourceRevision, rec.SourceDigest, rec.BaseSHA, rec.MissionBranch,
+		rec.AgentKitID, rec.AgentKitVersion, runnerArgs, rec.InvocationDigest,
+		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros,
+		rec.Objective, criteria, rec.ShapedDraftJSON,
+		rec.State, rec.Reconciliation, now,
 		rec.WorkspaceID, rec.PassID, expectedStoreRevision)
 	if err != nil {
 		return fmt.Errorf("store: put mission pass: %w", err)
@@ -699,10 +794,22 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		return fmt.Errorf("%w: expected store revision %d", ErrConflict, expectedStoreRevision)
 	}
 	_, err = c.ExecContext(ctx, `INSERT INTO mission_passes
-		(workspace_id, pass_id, store_revision, draft_version, authscope_mission_version, state, created_at, updated_at)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
+		(workspace_id, pass_id, store_revision, draft_version, authscope_mission_version,
+		 connection_id, issue_number, repository_name,
+		 proposal_id, proposal_digest, approved_proposal_digest,
+		 source_revision, source_digest, base_sha, mission_branch,
+		 agent_kit_id, agent_kit_version, runner_arguments, invocation_digest,
+		 expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
+		 shaped_draft_json, state, reconciliation, created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.WorkspaceID, rec.PassID, rec.DraftVersion, rec.AuthScopeMissionVersion,
-		rec.State, formatTime(rec.CreatedAt), now)
+		rec.ConnectionID, rec.IssueNumber, rec.RepositoryName,
+		rec.ProposalID, rec.ProposalDigest, rec.ApprovedProposalDigest,
+		rec.SourceRevision, rec.SourceDigest, rec.BaseSHA, rec.MissionBranch,
+		rec.AgentKitID, rec.AgentKitVersion, runnerArgs, rec.InvocationDigest,
+		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros, rec.Objective, criteria,
+		rec.ShapedDraftJSON, rec.State, rec.Reconciliation,
+		formatTime(rec.CreatedAt), now)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: pass already exists", ErrConflict)
@@ -712,18 +819,39 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 	return nil
 }
 
+const missionPassColumns = `workspace_id, pass_id, store_revision, draft_version,
+	authscope_mission_version, connection_id, issue_number, repository_name,
+	proposal_id, proposal_digest, approved_proposal_digest,
+	source_revision, source_digest, base_sha, mission_branch,
+	agent_kit_id, agent_kit_version, runner_arguments, invocation_digest,
+	expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
+	shaped_draft_json, state, reconciliation, created_at, updated_at`
+
 func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (MissionPassRecord, error) {
 	var rec MissionPassRecord
-	var created, updated string
-	err := c.QueryRowContext(ctx, `SELECT workspace_id, pass_id, store_revision, draft_version,
-		authscope_mission_version, state, created_at, updated_at
+	var runnerArgs, criteria, expires, created, updated string
+	err := c.QueryRowContext(ctx, `SELECT `+missionPassColumns+`
 		FROM mission_passes WHERE workspace_id = ? AND pass_id = ?`, workspaceID, passID).
 		Scan(&rec.WorkspaceID, &rec.PassID, &rec.StoreRevision, &rec.DraftVersion,
-			&rec.AuthScopeMissionVersion, &rec.State, &created, &updated)
+			&rec.AuthScopeMissionVersion, &rec.ConnectionID, &rec.IssueNumber, &rec.RepositoryName,
+			&rec.ProposalID, &rec.ProposalDigest, &rec.ApprovedProposalDigest,
+			&rec.SourceRevision, &rec.SourceDigest, &rec.BaseSHA, &rec.MissionBranch,
+			&rec.AgentKitID, &rec.AgentKitVersion, &runnerArgs, &rec.InvocationDigest,
+			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
+			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation, &created, &updated)
 	if err == sql.ErrNoRows {
 		return MissionPassRecord{}, fmt.Errorf("%w: mission pass %q", ErrNotFound, passID)
 	}
 	if err != nil {
+		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
+	}
+	if rec.RunnerArguments, err = decodeStringSlice(runnerArgs); err != nil {
+		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
+	}
+	if rec.AcceptanceCriteria, err = decodeStringSlice(criteria); err != nil {
+		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
+	}
+	if rec.ExpiresAt, err = parseOptionalTime(expires); err != nil {
 		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
 	}
 	if rec.CreatedAt, err = parseTime(created); err != nil {
@@ -733,6 +861,46 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
 	}
 	return rec, nil
+}
+
+// encodeStringSlice stores a string slice as a JSON array. A corrupt value
+// fails closed on read instead of silently yielding no entries.
+func encodeStringSlice(vals []string) (string, error) {
+	if vals == nil {
+		vals = []string{}
+	}
+	raw, err := json.Marshal(vals)
+	if err != nil {
+		return "", fmt.Errorf("store: encode string slice: %w", err)
+	}
+	return string(raw), nil
+}
+
+func decodeStringSlice(raw string) ([]string, error) {
+	var vals []string
+	if err := json.Unmarshal([]byte(raw), &vals); err != nil {
+		return nil, fmt.Errorf("store: decode string slice: %w", err)
+	}
+	if vals == nil {
+		vals = []string{}
+	}
+	return vals, nil
+}
+
+// formatOptionalTime renders a possibly-zero time for a nullable column.
+func formatOptionalTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return formatTime(t)
+}
+
+// parseOptionalTime parses a nullable time column; empty means zero.
+func parseOptionalTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return parseTime(s)
 }
 
 func putEventIfAbsent(ctx context.Context, c dbConn, rec MissionEventRecord) (bool, error) {
