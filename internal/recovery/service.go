@@ -385,6 +385,13 @@ func (s *Service) ResetOffline(ctx context.Context, req RecoveryRequest) (Recove
 		if err := s.store.WithTx(ctx, func(tx store.Tx) error {
 			return tx.SetRecoveryIntentAttestation(ctx, inst.WorkspaceID, key, attestationDigest, s.clock().UTC())
 		}); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				// A concurrent reset drove this intent out of pending
+				// while we worked: report in-progress so the caller
+				// retries into the completed replay instead of
+				// surfacing a store conflict.
+				return RecoveryResult{}, ErrRecoveryInProgress
+			}
 			return RecoveryResult{}, fmt.Errorf("recovery: record attestation: %w", err)
 		}
 		intent.AttestationDigest = attestationDigest
@@ -410,6 +417,11 @@ func (s *Service) ResetOffline(ctx context.Context, req RecoveryRequest) (Recove
 		if err := s.store.WithTx(ctx, func(tx store.Tx) error {
 			return tx.SetRecoveryIntentContained(ctx, inst.WorkspaceID, key, generation, s.clock().UTC())
 		}); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				// A concurrent reset completed the containment step
+				// first: this reset is the loser of the race.
+				return RecoveryResult{}, ErrRecoveryInProgress
+			}
 			return RecoveryResult{}, fmt.Errorf("recovery: record containment: %w", err)
 		}
 		intent.State = store.RecoveryIntentContained
