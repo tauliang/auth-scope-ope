@@ -90,3 +90,14 @@ a design baseline, not an implementation-ready authority.
 `make contract-ready` is RED. Task 1 remains open at this audit checkpoint.
 Task 2 has no authorized start condition until an immutable AuthScope release
 satisfies the full manifest in `contracts/ope-required-capabilities.json`.
+
+## Release resolution
+
+2026-09-18: the upstream delivery sequence in `docs/upstream-implementation-plan.md`
+is complete. Immutable release `tauliang/auth-scope@ope-v1.0.0` (GitHub release
+391187606) satisfies all 36 required operations in
+`contracts/ope-required-capabilities.json`. The vendored document
+`contracts/authscope-v1.yaml` (SHA-256
+`9516e098c5ee9196b6bc73f3633123d173d4249fbc0a5063843924d53b43af76`) matches
+`contracts/authscope.lock.json`, and `make contract-ready` exits 0. Task 2 now
+has an authorized start condition.

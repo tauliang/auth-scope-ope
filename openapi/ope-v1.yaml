@@ -1,0 +1,123 @@
+openapi: 3.1.0
+info:
+  title: AuthScope OPE Edition local API
+  version: 0.1.0
+  description: >
+    Local product API for the AuthScope OPE Edition. This service presents
+    authority, verifies local founder authentication, and renders verified
+    results. The upstream AuthScope service remains the only authority
+    evaluator.
+servers:
+  - url: /api/v1
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Process health
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness against the locked upstream contract
+      responses:
+        '200':
+          description: The locked contract is verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: The locked contract is not satisfied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+  /api/v1/bootstrap:
+    get:
+      operationId: getBootstrap
+      summary: First-paint product state
+      description: >
+        Returns only enrollment state, the immutable workspace binding, the
+        upstream compatibility status, and supported authority display labels.
+      responses:
+        '200':
+          description: Bootstrap state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ReadyResponse:
+      type: object
+      required: [status, core_version]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        core_version:
+          type: string
+        problems:
+          type: array
+          items:
+            type: string
+    WorkspaceBinding:
+      type: object
+      required: [workspace_id, hostname]
+      properties:
+        workspace_id:
+          type: string
+        hostname:
+          type: string
+    CompatibilityStatus:
+      type: object
+      required: [status, core_version]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        core_version:
+          type: string
+        problems:
+          type: array
+          items:
+            type: string
+    BootstrapResponse:
+      type: object
+      required: [enrolled, compatibility, authority_labels]
+      properties:
+        enrolled:
+          type: boolean
+        workspace:
+          $ref: '#/components/schemas/WorkspaceBinding'
+        compatibility:
+          $ref: '#/components/schemas/CompatibilityStatus'
+        authority_labels:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

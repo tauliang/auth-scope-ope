@@ -1,1 +1,8 @@
-{"core_version":"76fe961","core_version_kind":"commit","locked_at":"2026-09-17","note":"Audit baseline only. Commit 76fe961 is a design and contract-audit baseline; it is not an immutable release and cannot satisfy the contract-ready gate. Do not update this lock until an immutable compatible AuthScope release exists.","openapi_sha256":"8b9916ded625a3a56ac8a4df00bbea6446ee8a13fb5fe5e71326716345de3b7b","openapi_source":"tauliang/auth-scope@76fe961 openapi/auth-scope-v1.yaml"}
+{
+  "core_version": "ope-v1.0.0",
+  "core_version_kind": "release",
+  "locked_at": "2026-09-18",
+  "note": "Immutable AuthScope release satisfying the complete OPE capability manifest (36 operations). GitHub release 391187606.",
+  "openapi_sha256": "9516e098c5ee9196b6bc73f3633123d173d4249fbc0a5063843924d53b43af76",
+  "openapi_source": "tauliang/auth-scope@ope-v1.0.0 openapi/auth-scope-v1.yaml"
+}

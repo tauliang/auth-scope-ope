@@ -1,0 +1,14 @@
+# Go
+/bin/
+/var/ope/
+*.test
+*.out
+
+# Node / web
+web/node_modules/
+web/dist/
+web/coverage/
+web/.vite/
+
+# OS
+.DS_Store
