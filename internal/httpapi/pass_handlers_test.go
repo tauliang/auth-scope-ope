@@ -10,10 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
+
+// testInvocationDigest is the pinned invocation digest for the pass
+// fixture's kit and ordered arguments. The CLI launch handoff recomputes
+// this digest and rejects any mismatch, so the fixture uses the same
+// canonicalization.
+func testInvocationDigest() string {
+	return authn.InvocationDigestForLaunch("authscope-agent-kit", "1.0.0", []string{"authscope-agent-run", "--mission"})
+}
 
 // stubPassAuthority extends the GitHub stub with the mission-proposal
 // broker surface. ShapeMission echoes the requested budget and TTL the
@@ -25,19 +34,19 @@ type stubPassAuthority struct {
 	createErr       error
 	reconcileStatus string
 	// Approval stub fields (methods in approval_handlers_test.go).
-	mission             coreapi.Mission
-	approveErr          error
-	failApproveOnce     error
-	approveCalls        int
-	approveKeys         []string
-	prepareLaunchCalls  int
-	missionsCreated     int
-	approvedByKey       map[string]coreapi.Mission
-	signedAttestations  []identity.SignedDecisionAttestation
-	identityRoles       map[string][]string
-	identityKeys        map[string]ed25519.PublicKey
-	seenNonces          map[string]bool
-	expectedSubject     string
+	mission            coreapi.Mission
+	approveErr         error
+	failApproveOnce    error
+	approveCalls       int
+	approveKeys        []string
+	prepareLaunchCalls int
+	missionsCreated    int
+	approvedByKey      map[string]coreapi.Mission
+	signedAttestations []identity.SignedDecisionAttestation
+	identityRoles      map[string][]string
+	identityKeys       map[string]ed25519.PublicKey
+	seenNonces         map[string]bool
+	expectedSubject    string
 }
 
 func (s *stubPassAuthority) ShapeMission(_ context.Context, in coreapi.ShapeMissionRequest, _ coreapi.RequestOptions) (coreapi.MissionDraft, error) {
@@ -68,7 +77,7 @@ func newPassFixture(t *testing.T) *passFixture {
 	t.Helper()
 	f := newAuthTestFixture(t)
 	f.config.AuthScopeURL = "https://authscope.local"
-	invocation := "sha256:" + strings.Repeat("d", 64)
+	invocation := testInvocationDigest()
 	gh := &stubGitHubAuthority{
 		binding: coreapi.RepositoryBinding{
 			BindingID: "binding-1", WorkspaceID: "ws-test", Repository: "octo-org/repo",
@@ -115,6 +124,16 @@ func newPassFixture(t *testing.T) *passFixture {
 		MissionID: "mission-1", MissionRef: "mission-1", WorkspaceID: "ws-test",
 		State: "active", Version: 3,
 	}
+	attestor := identity.NewDecisionAttestor(signer)
+	cliAuth, err := authn.NewCLIAuthorizationService(authn.CLIAuthorizationConfig{
+		Store:          f.store,
+		Authn:          f.authn,
+		Attestor:       attestor,
+		BrowserBaseURL: "https://ope.example.com",
+	})
+	if err != nil {
+		t.Fatalf("new CLI authorization service: %v", err)
+	}
 	deps := Dependencies{
 		Config: f.config,
 		Contract: coreapi.ContractReport{
@@ -124,7 +143,8 @@ func newPassFixture(t *testing.T) *passFixture {
 		Store:     f.store,
 		Authn:     f.authn,
 		Authority: stub,
-		Attestor:  identity.NewDecisionAttestor(signer),
+		Attestor:  attestor,
+		CLIAuth:   cliAuth,
 	}
 	f.handler = New(deps)
 	csrf := f.enrollOverHTTP(t)
@@ -246,7 +266,7 @@ func TestPassDraftCreate(t *testing.T) {
 	if body.ProposalDigest != "sha256:"+strings.Repeat("f", 64) {
 		t.Errorf("proposal_digest = %q", body.ProposalDigest)
 	}
-	if body.InvocationDigest != "sha256:"+strings.Repeat("d", 64) {
+	if body.InvocationDigest != testInvocationDigest() {
 		t.Errorf("invocation_digest = %q", body.InvocationDigest)
 	}
 	if body.AgentKitID != "authscope-agent-kit" || body.AgentKitVersion != "1.0.0" {

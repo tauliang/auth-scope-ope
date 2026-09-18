@@ -103,3 +103,24 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Fatalf("Cache-Control = %q", got)
 	}
 }
+
+func TestCLIRoutesRegisteredOnlyWithService(t *testing.T) {
+	// Without the CLI authorization service the routes do not exist.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cli/authorizations", nil)
+	req.Header.Set("Content-Type", "application/json")
+	New(testDeps()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("create without service status = %d, want 404", rec.Code)
+	}
+	// With the service wired, create is reachable without a session: a
+	// malformed body fails validation (400), not routing (404).
+	f := newPassFixture(t)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/cli/authorizations", nil)
+	req.Header.Set("Content-Type", "application/json")
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create with service status = %d, want 400", rec.Code)
+	}
+}

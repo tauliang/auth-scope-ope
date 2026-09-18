@@ -104,6 +104,14 @@ type Store interface {
 	GetMissionPassRequestKeyClaimedAt(ctx context.Context, workspaceID, idempotencyKey string) (time.Time, error)
 	// Close releases the database connection.
 	Close() error
+	// GetCLIAuthorization returns one workspace-qualified CLI
+	// authorization, or ErrNotFound.
+	GetCLIAuthorization(ctx context.Context, workspaceID, authorizationID string) (CLIAuthorization, error)
+	// GetCLIAuthorizationByState returns the pending authorization opened
+	// with the given pass and state, or ErrNotFound. Create uses it for
+	// idempotent replay: the same canonical request replays, changed
+	// content conflicts.
+	GetCLIAuthorizationByState(ctx context.Context, workspaceID, passID, state string) (CLIAuthorization, error)
 }
 
 // Tx is the write side of the presentation store. Every method is
@@ -200,6 +208,17 @@ type Tx interface {
 	// PutOfflineRecoveryKey stores the hash of a founder's offline recovery
 	// key. A second key for the same founder returns ErrConflict.
 	PutOfflineRecoveryKey(ctx context.Context, rec OfflineRecoveryKeyRecord) error
+	// PutCLIAuthorization inserts one pending CLI authorization. A
+	// duplicate authorization ID returns ErrConflict. Only hashes of
+	// secret values are stored: the raw verifier and code never reach the
+	// store.
+	PutCLIAuthorization(ctx context.Context, rec CLIAuthorization) error
+	// ApproveCLIAuthorization atomically marks an authorization approved,
+	// recording the consumed decision challenge, the attestation digest,
+	// and the code hash. It affects exactly one row: an unknown ID or an
+	// already-approved authorization returns ErrConflict, which rejects
+	// duplicate and concurrent finishes.
+	ApproveCLIAuthorization(ctx context.Context, workspaceID, authorizationID, decisionChallengeID, attestationDigest string, codeHash [32]byte, approvedAt time.Time) error
 }
 
 // InstanceRecord is the immutable binding of one OPE instance. It is
@@ -443,4 +462,32 @@ type OfflineRecoveryKeyRecord struct {
 	FounderID   string
 	KeyHash     string // hex SHA-256 of the 256-bit recovery key
 	CreatedAt   time.Time
+}
+
+// CLIAuthorization is the durable record for a one-use browser PKCE
+// handoff. Only hashes of secret values are stored: the SHA-256 of the
+// authorization code, never the raw code or verifier. The signed decision
+// attestation lives only in process memory, never here.
+type CLIAuthorization struct {
+	WorkspaceID               string
+	AuthorizationID           string
+	PassID                    string
+	State                     string // original state, for the loopback redirect
+	CodeChallenge             string // S256 only
+	RedirectURI               string // exact loopback callback
+	EphemeralPublicKey        string // base64url X25519 public key
+	ProposalDigest            string
+	InvocationDigest          string
+	AgentKitID                string
+	AgentKitVersion           string
+	RunnerArguments           []string
+	MissionRef                string
+	MissionVersion            int64
+	CanonicalRequestDigest    [32]byte
+	DecisionChallengeID       string
+	DecisionAttestationDigest string
+	CodeHash                  [32]byte
+	ApprovedAt                *time.Time
+	ExpiresAt                 time.Time
+	CreatedAt                 time.Time
 }

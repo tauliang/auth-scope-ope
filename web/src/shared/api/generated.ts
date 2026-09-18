@@ -58,6 +58,38 @@ export interface BootstrapResponse {
   workspace?: WorkspaceBinding;
 }
 
+export interface CLIAuthorizationApproveBeginResponse {
+  agent_kit_id: string;
+  agent_kit_version: string;
+  assertion_options: unknown;
+  challenge_id: string;
+  invocation_digest: string;
+  issue_number: number;
+  pass_id: string;
+  proposal_digest: string;
+  repository_name: string;
+  runner_arguments: string[];
+}
+
+export interface CLIAuthorizationCreateRequest {
+  code_challenge: string;
+  code_challenge_method: "S256";
+  ephemeral_public_key: string;
+  pass_id: string;
+  redirect_uri: string;
+  state: string;
+}
+
+export interface CLIAuthorizationCreateResponse {
+  agent_kit_id: string;
+  agent_kit_version: string;
+  authorization_id: string;
+  browser_url: string;
+  invocation_digest: string;
+  proposal_digest: string;
+  runner_arguments: string[];
+}
+
 export interface CeremonyBeginResponse {
   ceremony_id: string;
   options: unknown;

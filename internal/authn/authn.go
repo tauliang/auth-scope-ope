@@ -133,12 +133,15 @@ const (
 	DecisionPassRevocation DecisionPurpose = "pass_revocation"
 	// DecisionExpansionApproval approves a mission expansion.
 	DecisionExpansionApproval DecisionPurpose = "expansion_approval"
+	// DecisionCLILaunchAuthorization authorizes one CLI launch of an
+	// approved pass through the browser PKCE handoff.
+	DecisionCLILaunchAuthorization DecisionPurpose = "cli_launch_authorization"
 )
 
 // validDecisionPurpose reports whether p is a known purpose.
 func validDecisionPurpose(p DecisionPurpose) bool {
 	switch p {
-	case DecisionPassApproval, DecisionPassRevocation, DecisionExpansionApproval:
+	case DecisionPassApproval, DecisionPassRevocation, DecisionExpansionApproval, DecisionCLILaunchAuthorization:
 		return true
 	}
 	return false

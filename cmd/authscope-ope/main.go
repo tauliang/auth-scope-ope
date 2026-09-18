@@ -11,9 +11,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/tauliang/authscope-ope/internal/authn"
+	"github.com/tauliang/authscope-ope/internal/cli"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
@@ -31,6 +34,10 @@ func main() {
 		if err := runServe(); err != nil {
 			log.Fatalf("serve: %v", err)
 		}
+	case "run":
+		if err := runLaunch(os.Args[2:]); err != nil {
+			log.Fatalf("run: %v", err)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
@@ -39,7 +46,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve    start the local OPE HTTP server\n")
+	fmt.Fprintf(os.Stderr, "usage: authscope-ope <command>\n\ncommands:\n  serve         start the local OPE HTTP server\n  run <pass-id> authorize one launch of an approved pass through the browser\n")
 }
 
 func runServe() error {
@@ -97,6 +104,16 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("authn service: %w", err)
 	}
+	attestor := identity.NewDecisionAttestor(signer)
+	cliAuth, err := authn.NewCLIAuthorizationService(authn.CLIAuthorizationConfig{
+		Store:          st,
+		Authn:          authnSvc,
+		Attestor:       attestor,
+		BrowserBaseURL: cfg.Origin,
+	})
+	if err != nil {
+		return fmt.Errorf("CLI authorization service: %w", err)
+	}
 	// The bootstrap code is issued and printed only for an unenrolled
 	// instance. EnsureBootstrapCode returns an empty code once a founder
 	// is enrolled, so the secret never appears on the terminal again.
@@ -108,10 +125,39 @@ func runServe() error {
 	handler := httpapi.New(httpapi.Dependencies{
 		Config: cfg, Contract: report, Store: st, Authn: authnSvc,
 		Gate: gate, Authority: gated,
-		Attestor: identity.NewDecisionAttestor(signer),
+		Attestor: attestor,
+		CLIAuth:  cliAuth,
 	})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)
+}
+
+// runLaunch authorizes one launch of an approved pass through the
+// one-use browser PKCE handoff. It prints the browser URL, waits for the
+// loopback callback, and retains the authorization bundle in memory for
+// the Task 9 exchange until interrupted. Secrets are zeroed on completion,
+// cancellation, timeout, or signal, and are never printed or written to
+// disk.
+func runLaunch(args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("usage: authscope-ope run <pass-id>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	bundle, err := cli.AuthorizeLaunch(ctx, "http://"+cfg.BindAddr, args[0], cli.Options{})
+	if err != nil {
+		return err
+	}
+	defer bundle.Destroy()
+	fmt.Printf("Authorized one launch of pass %s (authorization %s).\nProposal digest: %s\nHolding the authorization in memory for the launch exchange. Press Ctrl-C to discard it.\n",
+		bundle.PassID, bundle.AuthorizationID, bundle.ProposalDigest)
+	<-ctx.Done()
+	fmt.Println("Discarded the launch authorization.")
+	return nil
 }
 
 // resolveWorkloadSigner resolves the non-exportable workload signer for

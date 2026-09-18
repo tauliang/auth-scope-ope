@@ -37,6 +37,10 @@ type Dependencies struct {
 	// key. Nil in tests that do not exercise the approval routes; the
 	// approval routes are registered only when it is present.
 	Attestor *identity.DecisionAttestor
+	// CLIAuth runs the one-use browser PKCE handoff for CLI launch
+	// authorization. Nil in tests that do not exercise the CLI routes; the
+	// CLI routes are registered only when it is present.
+	CLIAuth *authn.CLIAuthorizationService
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2
@@ -74,6 +78,7 @@ func New(deps Dependencies) http.Handler {
 	gh := newGitHubServices(deps)
 	githubRoutes(mux, deps, gh)
 	passRoutes(mux, deps, gh)
+	cliRoutes(mux, deps)
 
 	return withSecurityHeaders(http.MaxBytesHandler(mux, maxBodyBytes))
 }

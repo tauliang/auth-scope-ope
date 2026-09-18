@@ -230,6 +230,57 @@ describe('App', () => {
     expect(sessionStorage.getItem('ope.github.pendingHandoff')).toBeNull();
   });
 
+  it('routes the transient CLI authorization path after login', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    const begun = {
+      challenge_id: 'challenge-9',
+      assertion_options: { publicKey: { challenge: 'abc' } },
+      pass_id: 'pass-1',
+      repository_name: 'octo-org/host',
+      issue_number: 7,
+      proposal_digest: `sha256:${'f'.repeat(64)}`,
+      invocation_digest: `sha256:${'d'.repeat(64)}`,
+      agent_kit_id: 'authscope-agent-kit',
+      agent_kit_version: '1.0.0',
+      runner_arguments: ['authscope-agent-run', '--mission'],
+    };
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/v1/bootstrap') {
+        return new Response(
+          JSON.stringify(bootstrapResponse({ enrolled: true, enrollment_state: 'authenticated' })),
+          { status: 200 },
+        );
+      }
+      if (url === '/api/v1/auth/login/begin') {
+        return new Response(JSON.stringify({ ceremony_id: 'c1', options: {} }), { status: 200 });
+      }
+      if (url === '/api/v1/auth/login/finish') {
+        return new Response(JSON.stringify({ csrf_token: 'csrf-1' }), { status: 200 });
+      }
+      if (url === '/api/v1/cli/authorizations/authz-9/approve/begin') {
+        return new Response(JSON.stringify(begun), { status: 201 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('location', {
+      pathname: '/authorize/cli/authz-9',
+      href: 'http://localhost/authorize/cli/authz-9',
+      assign: vi.fn(),
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /authenticate with passkey/i }));
+
+    // The transient route renders the CLI authorization page with the
+    // pinned launch bindings, not the regular product.
+    expect(await screen.findByText('octo-org/host')).toBeInTheDocument();
+    expect(screen.getByText('#7')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Authorize launch with passkey' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /github connection/i })).not.toBeInTheDocument();
+  });
+
   it('starts a fresh passkey login when the page holds no CSRF token', async () => {
     const full = bootstrapResponse({
       enrolled: true,

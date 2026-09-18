@@ -718,6 +718,162 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations:
+    post:
+      operationId: cliAuthorizationCreate
+      summary: Create a one-use CLI launch authorization
+      description: >
+        Called by the local CLI to open a one-use browser PKCE handoff for
+        launching an approved mission pass. The pass must be approved and
+        unexpired; the request binds the S256 PKCE challenge and the exact
+        loopback redirect URI, and the CLI supplies no other authority
+        fields. Returns the exact approved proposal digest, agent-kit
+        identity, ordered runner arguments, and invocation digest for the
+        CLI to recompute and compare, plus the browser URL to print.
+        Requires no browser session; per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLIAuthorizationCreateRequest'
+      responses:
+        '201':
+          description: Authorization created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIAuthorizationCreateResponse'
+        '400':
+          description: Bad request (invalid pass, PKCE challenge, or redirect URI).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not approved or has expired.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations/{id}/approve/begin:
+    post:
+      operationId: cliAuthorizationApproveBegin
+      summary: Begin the browser decision for a CLI launch authorization
+      description: >
+        Starts a one-use WebAuthn decision ceremony approving the exact
+        proposal bindings pinned at create time (pass, proposal digest,
+        invocation digest, agent-kit identity, ordered runner arguments,
+        mission reference and version). The browser supplies no binding or
+        authority fields; every bound value comes from the server-side
+        challenge record. Requires a founder session, CSRF token, exact Host
+        and Origin headers, JSON content type, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLIAuthorizationApproveBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The authorization expired, was already decided, or a launch binding changed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/authorizations/{id}/approve/finish:
+    post:
+      operationId: cliAuthorizationApproveFinish
+      summary: Finish the browser decision and redirect to the CLI loopback callback
+      description: >
+        Verifies the passkey assertion against the bound challenge, signs a
+        short-lived decision attestation for the CLI launch, and marks the
+        authorization consumed. On success the response is a 302 redirect to
+        the exact loopback callback URI bound at create time, carrying the
+        one-use authorization code and the original state. The browser UI
+        shows only "Return to the CLI" afterwards; the code, verifier, and
+        sealed runtime material are never rendered. Requires a founder
+        session, CSRF token, exact Host and Origin headers, JSON content
+        type, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalFinishRequest'
+      responses:
+        '302':
+          description: Redirect to the loopback callback with the one-use code.
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization or decision challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The authorization expired, was already consumed, or a launch binding changed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -1119,6 +1275,82 @@ components:
           description: >
             Opaque WebAuthn assertion JSON from the credential, as the
             server verifier expects.
+    CLIAuthorizationCreateRequest:
+      type: object
+      required: [pass_id, redirect_uri, state, code_challenge, code_challenge_method, ephemeral_public_key]
+      properties:
+        pass_id:
+          type: string
+        redirect_uri:
+          type: string
+          description: Exact loopback callback URI (http://127.0.0.1:<port>/callback).
+        state:
+          type: string
+          description: Opaque 256-bit state, base64url with no padding, returned verbatim to the callback.
+        code_challenge:
+          type: string
+          description: S256 PKCE code challenge, base64url with no padding.
+        code_challenge_method:
+          type: string
+          enum: [S256]
+          description: PKCE code challenge method. Only S256 is accepted.
+        ephemeral_public_key:
+          type: string
+          description: >
+            X25519 ephemeral public key, base64url with no padding,
+            binding the launch decision to this CLI instance.
+    CLIAuthorizationCreateResponse:
+      type: object
+      required: [authorization_id, browser_url, proposal_digest, agent_kit_id, agent_kit_version, runner_arguments, invocation_digest]
+      properties:
+        authorization_id:
+          type: string
+        browser_url:
+          type: string
+          description: The browser URL the CLI prints for the founder to approve the launch.
+        proposal_digest:
+          type: string
+          description: The exact approved proposal digest, for the CLI to recompute and compare.
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
+          description: The ordered runner arguments, for the CLI to recompute and compare.
+        invocation_digest:
+          type: string
+          description: The pinned launch invocation digest, for the CLI to recompute and compare.
+    CLIAuthorizationApproveBeginResponse:
+      type: object
+      required: [challenge_id, assertion_options, pass_id, repository_name, issue_number, proposal_digest, invocation_digest, agent_kit_id, agent_kit_version, runner_arguments]
+      properties:
+        challenge_id:
+          type: string
+        assertion_options:
+          description: >
+            Opaque WebAuthn request options JSON for the decision ceremony,
+            as produced by the server verifier.
+        pass_id:
+          type: string
+        repository_name:
+          type: string
+        issue_number:
+          type: integer
+        proposal_digest:
+          type: string
+        invocation_digest:
+          type: string
+        agent_kit_id:
+          type: string
+        agent_kit_version:
+          type: string
+        runner_arguments:
+          type: array
+          items:
+            type: string
     ApprovalResult:
       type: object
       required: [workspace_id, mission_ref, mission_hash, authscope_mission_version, approval_decision_ref]

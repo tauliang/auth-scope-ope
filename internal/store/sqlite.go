@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -36,6 +36,7 @@ var migrations = []struct {
 	{"004_mission_pass_proposal", "migrations/004_mission_pass_proposal.sql"},
 	{"005_mission_pass_request_keys", "migrations/005_mission_pass_request_keys.sql"},
 	{"006_mission_pass_approval", "migrations/006_mission_pass_approval.sql"},
+	{"007_cli_authorizations", "migrations/007_cli_authorizations.sql"},
 }
 
 // loadMigration reads one embedded migration file.

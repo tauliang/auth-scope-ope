@@ -8,8 +8,11 @@ import {
   authBootstrapRegisterFinish,
   authLoginBegin,
   authLoginFinish,
+  beginCliAuthorization,
   fetchBootstrap,
   fetchHealth,
+  finishCliAuthorization,
+  setCsrfToken,
 } from './client';
 
 describe('api client', () => {
@@ -49,6 +52,62 @@ describe('api client', () => {
     expect(health.status).toBe('ok');
     const [path] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(path).toBe('/healthz');
+  });
+
+  it('begins a CLI authorization with an idempotency key', async () => {
+    const begun = { challenge_id: 'challenge-1', options: {} };
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(begun), { status: 201 }));
+    const got = await beginCliAuthorization('authz-1', 'key-1');
+    expect(got.challenge_id).toBe('challenge-1');
+    const [path, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/v1/cli/authorizations/authz-1/approve/begin');
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe('key-1');
+  });
+
+  it('finishes a CLI authorization following the loopback redirect', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('Return to the CLI.', { status: 200 }));
+    await finishCliAuthorization('authz-1', 'challenge-1', { id: 'cred-1' }, 'key-2');
+    const [path, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/v1/cli/authorizations/authz-1/approve/finish');
+    expect(init.method).toBe('POST');
+    expect(init.redirect).toBe('follow');
+    expect(init.credentials).toBe('same-origin');
+    expect(JSON.parse(init.body as string)).toMatchObject({ challenge_id: 'challenge-1' });
+  });
+
+  it('raises ApiError when the CLI finish fails', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ title: 'gone' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/problem+json' },
+      }),
+    );
+    await expect(finishCliAuthorization('authz-1', 'challenge-1', {})).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('mints an idempotency key when the CLI begin omits one', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ challenge_id: 'c1' }), { status: 201 }));
+    await beginCliAuthorization('authz-1');
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy();
+  });
+
+  it('omits the CSRF header on CLI finish without a session token', async () => {
+    setCsrfToken(null);
+    vi.mocked(fetch).mockResolvedValue(new Response('Return to the CLI.', { status: 200 }));
+    await finishCliAuthorization('authz-1', 'challenge-1', { id: 'cred-1' });
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBeUndefined();
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy();
+  });
+
+  it('sends the CSRF token on CLI finish after login', async () => {
+    setCsrfToken('csrf-9');
+    vi.mocked(fetch).mockResolvedValue(new Response('Return to the CLI.', { status: 200 }));
+    await finishCliAuthorization('authz-1', 'challenge-1', { id: 'cred-1' });
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-9');
+    setCsrfToken(null);
   });
 });
 

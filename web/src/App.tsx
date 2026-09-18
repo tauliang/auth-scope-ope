@@ -9,6 +9,7 @@ import {
 } from './features/connect/GitHubConnection';
 import IssuePicker from './features/authorize/IssuePicker';
 import { MissionPassAuthorize } from './features/authorize/MissionPassReview';
+import { CLIAuthorization, cliAuthorizationIdFromPath } from './features/authorize/CLIAuthorization';
 
 type LoadState =
   | { kind: 'loading' }
@@ -172,6 +173,15 @@ export default function App() {
   // An authenticated bootstrap plus a remembered CSRF token means this
   // page holds a live founder session.
   if (bootstrap.enrollment_state === 'authenticated' && csrfToken) {
+    // The CLI one-use browser handoff lands here. The authorization id is
+    // transient: it lives only in the path, never in browser storage, and
+    // the page shows only the pinned launch bindings, then "Return to the
+    // CLI." after finish.
+    const cliAuthorizationId =
+      typeof window !== 'undefined' ? cliAuthorizationIdFromPath(window.location.pathname) : null;
+    if (cliAuthorizationId) {
+      return <CLIAuthorization authorizationId={cliAuthorizationId} />;
+    }
     return <AuthenticatedApp bootstrap={bootstrap} csrfToken={csrfToken} />;
   }
 

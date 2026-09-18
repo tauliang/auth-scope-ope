@@ -12,6 +12,7 @@ import type {
   BootstrapResponse,
   CeremonyBeginResponse,
   CeremonyFinishRequest,
+  CLIAuthorizationApproveBeginResponse,
   GitHubBeginRequest,
   GitHubBeginResponse,
   GitHubConnection,
@@ -285,4 +286,60 @@ export function finishMissionPassApproval(
 // mission result, a 202 carries the pending review.
 export function isApprovalResult(value: ApprovalResult | MissionPassReview): value is ApprovalResult {
   return typeof (value as ApprovalResult).mission_ref === 'string';
+}
+
+// beginCliAuthorization starts the one-use passkey decision ceremony for a
+// CLI launch authorization. The server binds the challenge to the exact
+// proposal values pinned at create time; the browser supplies no binding
+// or authority fields. The returned options are opaque to the client and
+// feed the WebAuthn call.
+export function beginCliAuthorization(
+  authorizationId: string,
+  idempotencyKey?: string,
+): Promise<CLIAuthorizationApproveBeginResponse> {
+  return postJson<CLIAuthorizationApproveBeginResponse>(
+    `/api/v1/cli/authorizations/${encodeURIComponent(authorizationId)}/approve/begin`,
+    {},
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// finishCliAuthorization completes the CLI decision ceremony with the
+// credential assertion. On success the server answers 302 to the exact
+// loopback callback bound at create time; fetch follows it so the one-use
+// code is delivered to the waiting CLI, and the loopback callback answers
+// "Return to the CLI". The code, verifier, and sealed runtime material are
+// never exposed to the page.
+export async function finishCliAuthorization(
+  authorizationId: string,
+  challengeId: string,
+  assertion: unknown,
+  idempotencyKey?: string,
+): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (csrfToken !== null) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+  headers['Idempotency-Key'] = idempotencyKey ?? newIdempotencyKey();
+  const body: ApprovalFinishRequest = { challenge_id: challengeId, assertion };
+  const path = `/api/v1/cli/authorizations/${encodeURIComponent(authorizationId)}/approve/finish`;
+  /* v8 ignore next -- defensive: all call sites use compile-time local paths */
+  if (!path.startsWith('/')) {
+    throw new Error(`refusing non-local API path: ${path}`);
+  }
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify(body),
+    redirect: 'follow',
+  });
+  if (!res.ok) {
+    const title = await problemTitle(res);
+    throw new ApiError(
+      res.status,
+      `request to ${path} failed with status ${res.status}`,
+      title,
+    );
+  }
 }
