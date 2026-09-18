@@ -53,6 +53,12 @@ func TestValidateRunnerPath(t *testing.T) {
 	if err := os.WriteFile(writable, []byte("#!/bin/sh\n"), 0o775); err != nil {
 		t.Fatal(err)
 	}
+	// WriteFile honors the process umask, which may strip the group/world
+	// writable bits (e.g. umask 0022 in CI). Chmod explicitly so the
+	// permission check is exercised regardless of umask.
+	if err := os.Chmod(writable, 0o775); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := cli.ValidateRunnerPath(writable); err == nil {
 		t.Fatal("expected error for group/world-writable runner")
 	}
