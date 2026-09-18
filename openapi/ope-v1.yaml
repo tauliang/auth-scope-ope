@@ -1423,7 +1423,7 @@ components:
             type: string
     BootstrapResponse:
       type: object
-      required: [enrolled, enrollment_state, compatibility, authority_labels]
+      required: [enrolled, enrollment_state, compatibility, authority_labels, telemetry_state]
       properties:
         enrolled:
           type: boolean
@@ -1438,6 +1438,13 @@ components:
           type: array
           items:
             type: string
+        telemetry_state:
+          type: string
+          enum: [enabled, disabled]
+          description: >-
+            The configured product telemetry state. "enabled" only when
+            the operator explicitly set OPE_TELEMETRY=enabled; the Connect
+            screen renders it so the state is always visible.
     BootstrapBeginRequest:
       type: object
       required: [code]

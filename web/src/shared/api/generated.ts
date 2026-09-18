@@ -55,6 +55,7 @@ export interface BootstrapResponse {
   compatibility: CompatibilityStatus;
   enrolled: boolean;
   enrollment_state: "needs_bootstrap" | "needs_recovery_method" | "locked" | "authenticated";
+  telemetry_state: "enabled" | "disabled";
   workspace?: WorkspaceBinding;
 }
 

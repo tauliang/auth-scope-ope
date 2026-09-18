@@ -15,6 +15,7 @@ const baseBootstrap: BootstrapResponse = {
   compatibility: { status: 'ready', core_version: 'ope-v1.0.0' },
   authority_labels: ['AuthScope mission authority'],
   workspace: { workspace_id: 'ws-test', hostname: 'ope.example.com' },
+  telemetry_state: 'disabled',
 };
 
 function bootstrapResponse(overrides: Partial<BootstrapResponse>): BootstrapResponse {

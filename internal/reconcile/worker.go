@@ -25,6 +25,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // reconcileOwner is the worker lease owner name.
@@ -82,6 +83,12 @@ type Config struct {
 	LeaseTTL     time.Duration
 	Clock        func() time.Time
 	Log          func(format string, args ...any)
+	// Telemetry records the receipt_verified and check_published funnel
+	// steps. Nil-safe: a nil sink records nothing.
+	Telemetry telemetry.Sink
+	// Mode selects the telemetry enforcement level
+	// ("development"/"release").
+	Mode string
 }
 
 // Worker is the leased reconciliation worker.
@@ -104,6 +111,10 @@ type Worker struct {
 	backoffCount map[string]int
 	incompatible map[string]bool
 	receipt      ReceiptService
+	// telemetry records the receipt_verified and check_published funnel
+	// steps; mode selects the enforcement level.
+	telemetry telemetry.Sink
+	mode      string
 }
 
 // newOwnerID mints a unique owner identity per worker process so two
@@ -162,6 +173,8 @@ func NewWorker(cfg Config) (*Worker, error) {
 		backoffUntil: map[string]time.Time{},
 		backoffCount: map[string]int{},
 		incompatible: map[string]bool{},
+		telemetry:    cfg.Telemetry,
+		mode:         cfg.Mode,
 	}, nil
 }
 
@@ -318,22 +331,46 @@ func (w *Worker) verifyReceipts(ctx context.Context) {
 		if missionpass.PassState(pass.State) != missionpass.PassOutcomePending {
 			continue
 		}
+		start := time.Now()
 		view, err := w.receipt.VerifyReceipt(ctx, w.workspaceID, pass.PassID)
 		if err != nil {
+			code := telemetry.ErrorInternal
 			if errors.Is(err, receipt.ErrReceiptUnverifiable) {
+				code = telemetry.ErrorReceiptUnverifiable
 				w.log("reconcile: pass %s receipt unverifiable: %v", pass.PassID, err)
-				continue
+			} else {
+				w.log("reconcile: pass %s receipt verify: %v", pass.PassID, err)
 			}
-			w.log("reconcile: pass %s receipt verify: %v", pass.PassID, err)
+			w.recordFunnel(ctx, telemetry.EventReceiptVerified, start, pass.PassID, "", code, telemetry.OutcomeFailed)
 			continue
 		}
 		if view == nil {
 			continue
 		}
+		w.recordFunnel(ctx, telemetry.EventReceiptVerified, start, pass.PassID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess)
+		pubStart := time.Now()
 		if err := w.receipt.PublishVerifiedCheck(ctx, w.workspaceID, pass.PassID); err != nil {
+			w.recordFunnel(ctx, telemetry.EventCheckPublished, pubStart, pass.PassID, "", telemetry.ErrorCheckPublishFailed, telemetry.OutcomeFailed)
 			w.log("reconcile: pass %s publish check: %v", pass.PassID, err)
+			continue
 		}
+		w.recordFunnel(ctx, telemetry.EventCheckPublished, pubStart, pass.PassID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess)
 	}
+}
+
+// recordFunnel records one funnel step event. A nil or disabled sink
+// records nothing.
+func (w *Worker) recordFunnel(ctx context.Context, name string, start time.Time, passID, runID, errCode, outcome string) {
+	_ = telemetry.MaybeRecord(w.telemetry, ctx, telemetry.Event{
+		Name:              name,
+		DurationMillis:    time.Since(start).Milliseconds(),
+		PassID:            passID,
+		RunID:             runID,
+		ErrorCode:         errCode,
+		EnforcementLevel:  telemetry.EnforcementForMode(w.mode),
+		InterventionCount: 0,
+		OutcomeClass:      outcome,
+	})
 }
 
 // reconcileCheckPublications settles in-flight check publications

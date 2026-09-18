@@ -93,6 +93,20 @@ export function ConnectPage({
           ))}
         </ul>
       </section>
+      <section aria-label="telemetry">
+        <h2>Telemetry</h2>
+        <p>
+          Product telemetry is{' '}
+          <strong>{bootstrap.telemetry_state === 'enabled' ? 'on' : 'off'}</strong>.
+        </p>
+        <p>
+          Telemetry records only funnel step names, durations, opaque
+          identifiers, error codes, and outcome classes. It never contains
+          repository names, issue content, prompts, patches, transcripts,
+          credentials, or receipt data. It stays off unless the operator
+          explicitly enables it.
+        </p>
+      </section>
       <GitHubConnectionStart onConnected={handleConnected} />
       <section aria-label="next step">
         <h2>Next step</h2>

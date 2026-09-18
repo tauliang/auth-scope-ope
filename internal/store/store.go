@@ -47,6 +47,17 @@ type Store interface {
 	// GetInstance returns the immutable instance binding, or ErrNotFound
 	// before BindInstance has run.
 	GetInstance(context.Context) (InstanceRecord, error)
+	// GetOrCreateTelemetrySalt returns the instance-local telemetry
+	// salt, generating and persisting 32 random bytes on first use. The
+	// salt pseudonymizes the installation ID in telemetry events so the
+	// raw instance ID never leaves the store.
+	GetOrCreateTelemetrySalt(context.Context) ([]byte, error)
+	// InsertTelemetryEvent records one validated telemetry event. The
+	// record carries only the fixed allowlisted fields.
+	InsertTelemetryEvent(ctx context.Context, rec TelemetryEventRecord) error
+	// ListTelemetryEvents returns telemetry events of a workspace,
+	// newest first, up to limit. Test and audit support.
+	ListTelemetryEvents(ctx context.Context, workspaceID string, limit int) ([]TelemetryEventRecord, error)
 	// GetMissionPass returns one workspace-qualified mission pass.
 	GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error)
 	// ListMissionPasses returns every mission pass of a workspace, oldest
@@ -515,6 +526,25 @@ type InstanceRecord struct {
 // has been attached to the instance record.
 func (r InstanceRecord) HasWorkloadIdentity() bool {
 	return r.WorkloadIdentityDigest != ""
+}
+
+// TelemetryEventRecord is one persisted telemetry event. It mirrors the
+// allowlisted telemetry.Event: step name, duration, pseudonymized
+// installation ID, opaque pass/run identifiers, fixed error code,
+// enforcement level, intervention count, and fixed outcome class. No
+// content fields exist by construction.
+type TelemetryEventRecord struct {
+	WorkspaceID       string
+	Name              string
+	DurationMillis    int64
+	InstallationID    string // pseudonymized with the instance-local salt
+	PassID            string
+	RunID             string
+	ErrorCode         string
+	EnforcementLevel  string
+	InterventionCount int64
+	OutcomeClass      string
+	OccurredAt        time.Time
 }
 
 // MissionPassRecord is the local presentation state of one mission pass.

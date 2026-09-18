@@ -1,4 +1,4 @@
-.PHONY: contract-ready verify e2e help build web-build docker-build clean
+.PHONY: contract-ready verify e2e help build web-build docker-build clean privacy-check credential-check
 
 GO ?= go
 export GOSUMDB=off
@@ -13,10 +13,18 @@ help:
 	@echo "  web-build       Build the web UI bundle into web/dist."
 	@echo "  build           Build the Go binary with the web bundle embedded (needs web-build first)."
 	@echo "  docker-build    Build the release image (multi-stage: web, then Go)."
+	@echo "  privacy-check   Scan every durable surface for seeded secret canaries."
+	@echo "  credential-check Prove runtime credentials reach the runner only on the anonymous FD."
 	@echo "  clean           Remove build artifacts (never pushed)."
 
 contract-ready:
 	scripts/verify-contract.sh
+
+privacy-check:
+	scripts/check-secrets.sh
+
+credential-check:
+	scripts/check-runtime-leaks.sh
 
 e2e:
 	scripts/run-e2e.sh

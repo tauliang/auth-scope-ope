@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/expansion"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // expansionRoutes registers the exact one-use expansion decision
@@ -69,6 +71,7 @@ func expansionRoutes(mux *http.ServeMux, deps Dependencies, authedStateChange fu
 		})
 	}))
 	mux.HandleFunc("POST /api/v1/expansions/{id}/decide/finish", authedStateChange(func(w http.ResponseWriter, r *http.Request, p authn.Principal) {
+		start := time.Now()
 		var req expansionFinishRequest
 		if !decodeJSONBody(w, r, &req) {
 			return
@@ -90,15 +93,21 @@ func expansionRoutes(mux *http.ServeMux, deps Dependencies, authedStateChange fu
 		res, err := svc.FinishDecision(r.Context(), p, expansionID, req.ChallengeID, assertion)
 		if err != nil {
 			if errors.Is(err, expansion.ErrExpansionPending) {
+				recordFunnel(deps.Telemetry, deps.Config.Mode, r.Context(), telemetry.EventExpansionDecided, start,
+					"", "", telemetry.ErrorNone, telemetry.OutcomePending, 0)
 				writeJSON(w, http.StatusAccepted, expansionPendingResponse{
 					ExpansionID:    expansionID,
 					Reconciliation: "pending",
 				})
 				return
 			}
+			recordFunnel(deps.Telemetry, deps.Config.Mode, r.Context(), telemetry.EventExpansionDecided, start,
+				"", "", funnelErrorCode(err), telemetry.OutcomeFailed, 0)
 			expansionProblem(w, err)
 			return
 		}
+		recordFunnel(deps.Telemetry, deps.Config.Mode, r.Context(), telemetry.EventExpansionDecided, start,
+			res.PassID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess, 0)
 		writeJSON(w, http.StatusOK, expansionFinishResponse{
 			ExpansionID:             res.ExpansionID,
 			PassID:                  res.PassID,

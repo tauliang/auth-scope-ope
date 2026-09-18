@@ -11,6 +11,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // passRoutes registers the mission-pass proposal routes. The draft open
@@ -53,7 +54,7 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 		})
 	}
 	mux.HandleFunc("POST /api/v1/mission-passes/drafts", authedStateChange(func(w http.ResponseWriter, r *http.Request, p authn.Principal) {
-		handlePassDraftCreate(svc, w, r, p)
+		handlePassDraftCreate(svc, deps.Telemetry, deps.Config.Mode, w, r, p)
 	}))
 	mux.HandleFunc("PUT /api/v1/mission-passes/{id}/draft", authedStateChange(func(w http.ResponseWriter, r *http.Request, p authn.Principal) {
 		handlePassDraftRevise(svc, w, r, p)
@@ -72,7 +73,7 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 			}
 			handlePassGet(svc, w, r, principal)
 		}))
-	approvalRoutes(mux, svc, approval, authedStateChange)
+	approvalRoutes(mux, svc, approval, deps.Telemetry, deps.Config.Mode, authedStateChange)
 	revokeRoutes(mux, deps, authedStateChange)
 	expansionRoutes(mux, deps, authedStateChange)
 	eventRoutes(mux, deps, deps.Projector, deps.Revocation)
@@ -112,7 +113,8 @@ var passProtectedFields = []string{
 	"enforcement",
 }
 
-func handlePassDraftCreate(svc *missionpass.Service, w http.ResponseWriter, r *http.Request, p authn.Principal) {
+func handlePassDraftCreate(svc *missionpass.Service, tel telemetry.Sink, mode string, w http.ResponseWriter, r *http.Request, p authn.Principal) {
+	start := time.Now()
 	var req PassDraftCreateRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -133,9 +135,23 @@ func handlePassDraftCreate(svc *missionpass.Service, w http.ResponseWriter, r *h
 		IdempotencyKey:         key,
 	})
 	if err != nil {
+		// The issue was selected but the proposal never became ready.
+		recordFunnel(tel, mode, r.Context(), telemetry.EventIssueSelected, start,
+			rec.PassID, "", funnelErrorCode(err), telemetry.OutcomeFailed, 0)
 		writePassResult(svc, w, r, p, rec.PassID, err)
 		return
 	}
+	// The issue is selected when the draft opens for it; the proposal is
+	// ready when the upstream proposal is created and reviewable. The
+	// intervention count is the number of founder revises so far.
+	recordFunnel(tel, mode, r.Context(), telemetry.EventIssueSelected, start,
+		rec.PassID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess, 0)
+	interventions := 0
+	if rec.DraftVersion > 1 {
+		interventions = int(rec.DraftVersion - 1)
+	}
+	recordFunnel(tel, mode, r.Context(), telemetry.EventProposalReady, start,
+		rec.PassID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess, interventions)
 	review, err := svc.LoadReview(r.Context(), p.WorkspaceID, rec.PassID)
 	if err != nil {
 		passProblem(w, err)

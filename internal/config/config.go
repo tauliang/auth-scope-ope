@@ -68,6 +68,11 @@ type Config struct {
 	// executable the CLI starts. Set OPE_RUNNER_PATH; the run command
 	// requires it and validates the binary before every launch.
 	RunnerPath string
+	// TelemetryEnabled is the explicit operator opt-in for
+	// privacy-limited product telemetry. Only OPE_TELEMETRY=enabled
+	// turns it on; telemetry is off by default in development and stays
+	// off in release mode until explicitly configured.
+	TelemetryEnabled bool
 }
 
 // Load reads and validates configuration from the environment.
@@ -110,6 +115,10 @@ func Load() (Config, error) {
 	c.DataDir = getenv("OPE_DATA_DIR", "./var/ope")
 	c.RootDir = getenv("OPE_ROOT", ".")
 	c.RunnerPath = strings.TrimSpace(os.Getenv("OPE_RUNNER_PATH"))
+	// Telemetry is consent-gated: only an explicit OPE_TELEMETRY=enabled
+	// turns it on. Development defaults to off, and release mode keeps
+	// it off until explicitly configured.
+	c.TelemetryEnabled = strings.TrimSpace(os.Getenv("OPE_TELEMETRY")) == "enabled"
 
 	if err := loadInstanceBinding(&c); err != nil {
 		return Config{}, err

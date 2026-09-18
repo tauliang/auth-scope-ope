@@ -28,6 +28,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/reconcile"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 	"github.com/tauliang/authscope-ope/internal/trust"
 )
 
@@ -154,6 +155,13 @@ func runServe() error {
 		Authority:    gated,
 		Attestations: cliAuth.Attestations(),
 		Keys:         keys,
+		Telemetry: telemetry.NewSink(telemetry.SinkConfig{
+			Enabled:     cfg.TelemetryEnabled,
+			Store:       st,
+			WorkspaceID: cfg.WorkspaceID,
+			InstanceID:  cfg.InstanceID,
+		}),
+		Mode: cfg.Mode,
 	})
 	if err != nil {
 		return fmt.Errorf("launch service: %w", err)
@@ -222,6 +230,13 @@ func runServe() error {
 		PollInterval: 10 * time.Second,
 		LeaseTTL:     30 * time.Second,
 		Log:          log.Printf,
+		Telemetry: telemetry.NewSink(telemetry.SinkConfig{
+			Enabled:     cfg.TelemetryEnabled,
+			Store:       st,
+			WorkspaceID: cfg.WorkspaceID,
+			InstanceID:  cfg.InstanceID,
+		}),
+		Mode: cfg.Mode,
 	})
 	if err != nil {
 		return fmt.Errorf("reconciliation worker: %w", err)
@@ -245,6 +260,12 @@ func runServe() error {
 		Projector:     projector,
 		Expansion:     expansionSvc,
 		Receipt:       receiptSvc,
+		Telemetry: telemetry.NewSink(telemetry.SinkConfig{
+			Enabled:     cfg.TelemetryEnabled,
+			Store:       st,
+			WorkspaceID: cfg.WorkspaceID,
+			InstanceID:  cfg.InstanceID,
+		}),
 	})
 	srv := &http.Server{Addr: cfg.BindAddr, Handler: handler}
 	// A server start failure (for example, the port is taken) returns

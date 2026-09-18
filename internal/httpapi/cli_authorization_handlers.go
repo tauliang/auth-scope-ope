@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/tauliang/authscope-ope/internal/authn"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // cliRoutes registers the CLI handoff routes. The browser handoff routes
@@ -67,7 +69,7 @@ func cliRoutes(mux *http.ServeMux, deps Dependencies) {
 		handleCLIAuthorizationApproveBegin(svc, w, r, p)
 	}))
 	mux.HandleFunc("POST /api/v1/cli/authorizations/{id}/approve/finish", authed(func(w http.ResponseWriter, r *http.Request, p authn.Principal) {
-		handleCLIAuthorizationApproveFinish(svc, w, r, p)
+		handleCLIAuthorizationApproveFinish(svc, deps.Telemetry, deps.Config.Mode, w, r, p)
 	}))
 }
 
@@ -164,16 +166,23 @@ func handleCLIAuthorizationApproveBegin(svc *authn.CLIAuthorizationService, w ht
 	})
 }
 
-func handleCLIAuthorizationApproveFinish(svc *authn.CLIAuthorizationService, w http.ResponseWriter, r *http.Request, p authn.Principal) {
+func handleCLIAuthorizationApproveFinish(svc *authn.CLIAuthorizationService, tel telemetry.Sink, mode string, w http.ResponseWriter, r *http.Request, p authn.Principal) {
+	start := time.Now()
 	var req cliApproveFinishRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
-	redirect, err := svc.FinishBrowserDecision(r.Context(), p, r.PathValue("id"), req.ChallengeID, req.Assertion)
+	authID := r.PathValue("id")
+	redirect, err := svc.FinishBrowserDecision(r.Context(), p, authID, req.ChallengeID, req.Assertion)
 	if err != nil {
+		// The authorization ID is opaque; it is safe to record.
+		recordFunnel(tel, mode, r.Context(), telemetry.EventCLIAuthorized, start,
+			"", "", funnelErrorCode(err), telemetry.OutcomeFailed, 0)
 		cliAuthProblem(w, err)
 		return
 	}
+	recordFunnel(tel, mode, r.Context(), telemetry.EventCLIAuthorized, start,
+		"", "", telemetry.ErrorNone, telemetry.OutcomeSuccess, 0)
 	// Task 8: the decision hands back to the CLI with a real redirect to
 	// the exact loopback callback bound at create time, carrying the
 	// one-use code and the original state. The UI shows only

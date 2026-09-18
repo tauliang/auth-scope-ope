@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/github"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // approvalBeginResponse returns the one-use challenge for the passkey
@@ -54,7 +56,7 @@ func newApprovalService(deps Dependencies, source *github.Source) *missionpass.A
 // approvalRoutes registers the approval endpoints. It is a no-op when
 // the approval service is nil; without a workload signing key there is
 // no approval flow to serve.
-func approvalRoutes(mux *http.ServeMux, svc *missionpass.Service, approval *missionpass.ApprovalService, authedStateChange func(func(http.ResponseWriter, *http.Request, authn.Principal)) http.HandlerFunc) {
+func approvalRoutes(mux *http.ServeMux, svc *missionpass.Service, approval *missionpass.ApprovalService, tel telemetry.Sink, mode string, authedStateChange func(func(http.ResponseWriter, *http.Request, authn.Principal)) http.HandlerFunc) {
 	if approval == nil {
 		return
 	}
@@ -75,6 +77,7 @@ func approvalRoutes(mux *http.ServeMux, svc *missionpass.Service, approval *miss
 		})
 	}))
 	mux.HandleFunc("POST /api/v1/mission-passes/{id}/approve/finish", authedStateChange(func(w http.ResponseWriter, r *http.Request, p authn.Principal) {
+		start := time.Now()
 		var req approvalFinishRequest
 		if !decodeJSONBody(w, r, &req) {
 			return
@@ -96,6 +99,8 @@ func approvalRoutes(mux *http.ServeMux, svc *missionpass.Service, approval *miss
 		res, err := approval.Finish(r.Context(), p, passID, req.ChallengeID, assertion)
 		if err != nil {
 			if errors.Is(err, missionpass.ErrPendingReconciliation) {
+				recordFunnel(tel, mode, r.Context(), telemetry.EventApproved, start,
+					passID, "", telemetry.ErrorNone, telemetry.OutcomePending, 0)
 				// The upstream outcome is uncertain: persist intent and
 				// report 202 so the UI can reconcile through GET.
 				if review, lerr := svc.LoadReview(r.Context(), p.WorkspaceID, passID); lerr == nil {
@@ -105,9 +110,13 @@ func approvalRoutes(mux *http.ServeMux, svc *missionpass.Service, approval *miss
 				writeProblem(w, http.StatusAccepted, "reconciliation pending", "The approval reached the upstream but the outcome is uncertain. Reopen the pass to reconcile.")
 				return
 			}
+			recordFunnel(tel, mode, r.Context(), telemetry.EventApproved, start,
+				passID, "", funnelErrorCode(err), telemetry.OutcomeFailed, 0)
 			approvalProblem(w, err)
 			return
 		}
+		recordFunnel(tel, mode, r.Context(), telemetry.EventApproved, start,
+			passID, "", telemetry.ErrorNone, telemetry.OutcomeSuccess, 0)
 		writeJSON(w, http.StatusOK, res)
 	}))
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/missionpass"
 	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // maxBodyBytes bounds every JSON request body the local API accepts.
@@ -70,6 +71,10 @@ type Dependencies struct {
 	// registered only when it is present. There is no manual check
 	// publication endpoint: publication is owned by the worker.
 	Receipt *receipt.Service
+	// Telemetry is the privacy-limited funnel sink. Nil in tests and
+	// when telemetry is not explicitly enabled; handlers must treat a
+	// nil sink as "record nothing".
+	Telemetry telemetry.Sink
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2
@@ -87,14 +92,19 @@ type CompatibilityStatus struct {
 }
 
 // BootstrapResponse is the first paint of the product: enrollment state,
-// immutable workspace binding, compatibility status, and the authority
-// display labels the UI may render. Nothing else is exposed here.
+// immutable workspace binding, compatibility status, the authority
+// display labels the UI may render, and the configured telemetry state.
+// Nothing else is exposed here.
 type BootstrapResponse struct {
 	Enrolled        bool                `json:"enrolled"`
 	EnrollmentState string              `json:"enrollment_state"`
 	Workspace       *WorkspaceBinding   `json:"workspace,omitempty"`
 	Compatibility   CompatibilityStatus `json:"compatibility"`
 	AuthorityLabels []string            `json:"authority_labels"`
+	// TelemetryState is "enabled" only when the operator explicitly set
+	// OPE_TELEMETRY=enabled; otherwise "disabled". The Connect screen
+	// renders it so the configured state is always visible.
+	TelemetryState string `json:"telemetry_state"`
 }
 
 // New builds the HTTP handler for the local OPE API.
@@ -192,6 +202,7 @@ func handleBootstrap(deps Dependencies) http.HandlerFunc {
 				Problems:    deps.Contract.Problems,
 			},
 			AuthorityLabels: []string{"AuthScope mission authority"},
+			TelemetryState:  telemetryState(deps.Config),
 		}
 		if deps.Authn != nil {
 			var bootstrapToken, sessionToken string

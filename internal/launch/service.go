@@ -25,6 +25,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 	"github.com/tauliang/authscope-ope/internal/trust"
 )
 
@@ -95,6 +96,12 @@ type Config struct {
 	// DeliveryCap bounds the in-memory delivery cache. Zero selects the
 	// default.
 	DeliveryCap int
+	// Telemetry records the run_prepared funnel step. Nil-safe: a nil
+	// sink records nothing.
+	Telemetry telemetry.Sink
+	// Mode selects the telemetry enforcement level
+	// ("development"/"release").
+	Mode string
 }
 
 // ExchangeRequest carries the one-use authorization code and the PKCE
@@ -121,6 +128,10 @@ type Service struct {
 	keys         *trust.KeyStore
 	clock        func() time.Time
 	deliveryCap  int
+	// telemetry records the run_prepared funnel step; mode selects the
+	// enforcement level. Both are nil-safe.
+	telemetry telemetry.Sink
+	mode      string
 
 	mu       sync.Mutex
 	delivery map[string]ExchangeResult
@@ -165,20 +176,55 @@ func NewService(cfg Config) (*Service, error) {
 		clock:        clock,
 		deliveryCap:  cap,
 		delivery:     make(map[string]ExchangeResult),
+		telemetry:    cfg.Telemetry,
+		mode:         cfg.Mode,
 	}, nil
 }
 
 // ExchangeAndPrepare exchanges one authorization code plus verifier for
-// the prepared governed run, exactly once per code.
-//
-// A per-code stripe serializes concurrent submissions inside this
-// process; the durable claim serializes across processes. The row's
-// status decides the path: a completed row replays the sealed bytes
-// (after the verifier is re-proven), a failed or expired row reports its
-// terminal state, and an in-flight row reconciles the ambiguous upstream
-// outcome instead of reissuing preparation. Only a fresh code reaches
-// validation and the single PrepareLaunch call.
+// the prepared governed run, exactly once per code. It records the
+// run_prepared funnel step: only the opaque run ID, duration, a fixed
+// error code, and the outcome class leave this service as telemetry.
 func (s *Service) ExchangeAndPrepare(ctx context.Context, req ExchangeRequest) (ExchangeResult, error) {
+	start := time.Now()
+	res, err := s.exchangeAndPrepare(ctx, req)
+	outcome := telemetry.OutcomeSuccess
+	code := telemetry.ErrorNone
+	if err != nil {
+		code, outcome = launchTelemetryOutcome(err)
+	}
+	_ = telemetry.MaybeRecord(s.telemetry, ctx, telemetry.Event{
+		Name:              telemetry.EventRunPrepared,
+		DurationMillis:    time.Since(start).Milliseconds(),
+		RunID:             res.RunID,
+		ErrorCode:         code,
+		EnforcementLevel:  telemetry.EnforcementForMode(s.mode),
+		InterventionCount: 0,
+		OutcomeClass:      outcome,
+	})
+	return res, err
+}
+
+// launchTelemetryOutcome maps an exchange failure to the fixed
+// telemetry error-code and outcome enums. No detail leaves the
+// service.
+func launchTelemetryOutcome(err error) (string, string) {
+	var upErr *coreapi.UpstreamError
+	if errors.As(err, &upErr) {
+		if upErr.StatusCode >= 400 && upErr.StatusCode < 500 {
+			return telemetry.ErrorUpstreamRejected, telemetry.OutcomeDenied
+		}
+		return telemetry.ErrorUpstreamUnreachable, telemetry.OutcomeFailed
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return telemetry.ErrorUpstreamUnreachable, telemetry.OutcomeFailed
+	}
+	return telemetry.ErrorInternal, telemetry.OutcomeFailed
+}
+
+// exchangeAndPrepare is the inner exchange implementation. See
+// ExchangeAndPrepare above.
+func (s *Service) exchangeAndPrepare(ctx context.Context, req ExchangeRequest) (ExchangeResult, error) {
 	codeRaw, err := base64.RawURLEncoding.DecodeString(req.Code)
 	if err != nil || len(codeRaw) != 32 {
 		return ExchangeResult{}, ErrExchangeNotFound

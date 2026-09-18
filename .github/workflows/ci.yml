@@ -21,6 +21,10 @@ jobs:
           node-version: "22"
       - name: contract gate
         run: make contract-ready
+      - name: privacy scan
+        run: make privacy-check
+      - name: credential channel check
+        run: make credential-check
       - name: full verification
         run: make verify
 

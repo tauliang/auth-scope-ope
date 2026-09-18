@@ -11,6 +11,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/github"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/telemetry"
 )
 
 // githubCompletionPath is the fixed same-origin path the AuthScope
@@ -29,6 +30,10 @@ const idempotencyKeyHeader = "Idempotency-Key"
 type githubServices struct {
 	handoff *github.Handoff
 	source  *github.Source
+	// telemetry records the connect funnel step; mode selects the
+	// enforcement level. Both are nil-safe.
+	telemetry telemetry.Sink
+	mode      string
 }
 
 // newGitHubServices builds the shared services from the server
@@ -56,7 +61,7 @@ func newGitHubServices(deps Dependencies) *githubServices {
 	if err != nil {
 		return nil
 	}
-	return &githubServices{handoff: handoff, source: source}
+	return &githubServices{handoff: handoff, source: source, telemetry: deps.Telemetry, mode: deps.Config.Mode}
 }
 
 // githubRoutes registers the four GitHub connection routes. Begin and
@@ -191,6 +196,7 @@ func connectionView(c store.ConnectionRecord) GitHubConnectionView {
 }
 
 func handleGitHubFinish(gh *githubServices, w http.ResponseWriter, r *http.Request, p authn.Principal) {
+	start := time.Now()
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -202,9 +208,13 @@ func handleGitHubFinish(gh *githubServices, w http.ResponseWriter, r *http.Reque
 	handoffID := r.PathValue("handoff_id")
 	res, err := gh.handoff.Finish(r.Context(), p.WorkspaceID, p.SessionID, handoffID, key)
 	if err != nil {
+		recordFunnel(gh.telemetry, gh.mode, r.Context(), telemetry.EventConnect, start,
+			"", "", funnelErrorCode(err), telemetry.OutcomeFailed, 0)
 		githubProblem(w, err)
 		return
 	}
+	recordFunnel(gh.telemetry, gh.mode, r.Context(), telemetry.EventConnect, start,
+		"", "", telemetry.ErrorNone, telemetry.OutcomeSuccess, 0)
 	writeJSON(w, http.StatusOK, connectionView(res.Connection))
 }
 
