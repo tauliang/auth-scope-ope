@@ -55,6 +55,16 @@ type Store interface {
 	// GetMissionProjection returns the durable event-projection state of a
 	// pass, or ErrNotFound when no event was ever projected.
 	GetMissionProjection(ctx context.Context, workspaceID, passID string) (MissionProjection, error)
+	// GetReceiptView returns the stored receipt view for a pass, or
+	// ErrNotFound when no receipt was verified yet.
+	GetReceiptView(ctx context.Context, workspaceID, passID string) (ReceiptViewRecord, error)
+	// GetLatestCheckPublicationForPass returns the newest publication
+	// intent for a pass, or ErrNotFound when nothing was published yet.
+	GetLatestCheckPublicationForPass(ctx context.Context, workspaceID, passID string) (CheckPublicationRecord, error)
+	// ListCheckPublications returns the publication intents of a
+	// workspace in the given state, oldest first. An empty state lists
+	// every intent.
+	ListCheckPublications(ctx context.Context, workspaceID, state string) ([]CheckPublicationRecord, error)
 	// CountFounders returns the number of enrolled founders in a workspace.
 	CountFounders(ctx context.Context, workspaceID string) (int, error)
 	// ListFounders returns every enrolled founder in a workspace.
@@ -165,6 +175,9 @@ type Tx interface {
 	// Reconnection replaces a revoked binding transactionally: the row is
 	// overwritten in full, never merged with the revoked binding's state.
 	PutConnection(context.Context, ConnectionRecord) error
+	// GetConnection returns one workspace-qualified GitHub connection
+	// inside the transaction, or ErrNotFound.
+	GetConnection(ctx context.Context, workspaceID, connectionID string) (ConnectionRecord, error)
 	// PutGitHubHandoff inserts one handoff record. A duplicate handoff ID
 	// returns ErrConflict.
 	PutGitHubHandoff(context.Context, GitHubHandoffRecord) error
@@ -341,6 +354,40 @@ type Tx interface {
 	// completed with the decision reference and the resulting upstream
 	// mission version.
 	CompleteExpansionIntent(ctx context.Context, workspaceID, expansionID, decisionRef string, resultMissionVersion int64) error
+	// ListExpansionIntents returns the expansion decision intents of a
+	// workspace in the given state, oldest first.
+	ListExpansionIntents(ctx context.Context, workspaceID, state string) ([]ExpansionIntentRecord, error)
+	// PutReceiptView upserts the verified receipt projection (or the
+	// unverifiable verdict) for a pass. The raw signed envelope is never
+	// persisted: only the receipt digest and the fixed verified fields.
+	// A verified view never overwrites an unverifiable verdict for a
+	// different receipt digest; that case is a dispute and is surfaced,
+	// not silently replaced.
+	PutReceiptView(context.Context, ReceiptViewRecord) error
+	// GetReceiptView returns the stored receipt view for a pass, or
+	// ErrNotFound when no receipt was verified yet.
+	GetReceiptView(ctx context.Context, workspaceID, passID string) (ReceiptViewRecord, error)
+	// PutCheckPublicationIfAbsent inserts the durable intent behind one
+	// GitHub check publication idempotency key. It returns true when the
+	// intent was inserted and false when the key already exists.
+	PutCheckPublicationIfAbsent(context.Context, CheckPublicationRecord) (bool, error)
+	// GetCheckPublication returns the publication intent for an
+	// idempotency key, or ErrNotFound.
+	GetCheckPublication(ctx context.Context, workspaceID, idempotencyKey string) (CheckPublicationRecord, error)
+	// GetLatestCheckPublicationForPass returns the newest publication
+	// intent for a pass, or ErrNotFound when nothing was published yet.
+	GetLatestCheckPublicationForPass(ctx context.Context, workspaceID, passID string) (CheckPublicationRecord, error)
+	// ListCheckPublications returns the publication intents of a
+	// workspace in the given state, oldest first. An empty state lists
+	// every intent.
+	ListCheckPublications(ctx context.Context, workspaceID, state string) ([]CheckPublicationRecord, error)
+	// SetCheckPublicationState moves a publication intent to a new state
+	// and records the upstream check run ID when known.
+	SetCheckPublicationState(ctx context.Context, workspaceID, idempotencyKey, state, checkRunID string, at time.Time) error
+	// MarkCheckPublicationsDisputedExcept marks every non-settled
+	// publication intent of a pass disputed except the given key. It is
+	// used when a newer receipt digest supersedes the published one.
+	MarkCheckPublicationsDisputedExcept(ctx context.Context, workspaceID, passID, exceptKey string, at time.Time) error
 	// PutCLIRevocation inserts one pending CLI revocation request. A
 	// duplicate request ID returns ErrConflict. Only hashes of secret
 	// values are stored: the raw result code and verifier never reach the
@@ -453,8 +500,12 @@ type MissionPassRecord struct {
 	// revocation. A pending containment is reconciled by the
 	// server-owned worker.
 	Containment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ReceiptPendingAt records when the upstream receipt-ready signal was
+	// projected. It is zero until then. The worker verifies the receipt
+	// locally and only the verified receipt moves the pass terminal.
+	ReceiptPendingAt time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // ApprovalIntentState values for ApprovalIntentRecord.
@@ -601,6 +652,79 @@ type ExpansionIntentRecord struct {
 	ResultMissionVersion int64
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+}
+
+// Receipt verification states persisted for a pass. ReceiptStatePending
+// is the implicit state of a pass with no receipt view row yet.
+const (
+	ReceiptStatePending = "pending"
+	ReceiptVerified     = "verified"
+	ReceiptUnverifiable = "unverifiable"
+)
+
+// ReceiptViewRecord is the persisted verified receipt projection for a
+// pass, or the latched unverifiable verdict. The raw signed envelope
+// is never stored: only the receipt digest and the fixed verified
+// fields. JSON columns carry the structured sub-documents; private
+// detail URLs and secret material are stripped before the row is
+// written.
+type ReceiptViewRecord struct {
+	WorkspaceID               string
+	PassID                    string
+	Verification              string
+	ReasonCode                string
+	ReceiptID                 string
+	GrantID                   string
+	MissionRef                string
+	KeyID                     string
+	SignedAt                  time.Time
+	ReceiptDigest             string
+	SettlementDigest          string
+	Outcome                   string
+	MissionVersionsJSON       string
+	ExpansionDecisionRefsJSON string
+	RepositoryID              int64
+	IssueNumber               int64
+	Branch                    string
+	PullRequestNumber         int64
+	HeadSHA                   string
+	ChecksJSON                string
+	StartedAt                 time.Time
+	FinishedAt                time.Time
+	AggregateCostMicros       int64
+	BudgetMicros              int64
+	HistoricalEnforcementJSON string
+	VerifiedAt                time.Time
+}
+
+// Check publication intent states mirror the revocation intent
+// lifecycle, plus disputed for a superseded or conflicting upstream
+// check.
+const (
+	CheckPublicationInFlight = "in_flight"
+	CheckPublicationSettled  = "settled"
+	CheckPublicationDisputed = "disputed"
+)
+
+// CheckPublicationRecord is the durable intent behind one GitHub check
+// publication idempotency key. The key is derived from the workspace,
+// the receipt digest, and the repository binding triple, so retries
+// and duplicate deliveries never create a second check run. Only the
+// minimal public check content is ever published; the row carries no
+// receipt payload.
+type CheckPublicationRecord struct {
+	WorkspaceID       string
+	PassID            string
+	IdempotencyKey    string
+	ReceiptDigest     string
+	RepositoryID      int64
+	PullRequestNumber int64
+	HeadSHA           string
+	BindingID         string
+	State             string
+	CheckRunID        string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // CLIRevocation is the durable record for a result-only loopback PKCE

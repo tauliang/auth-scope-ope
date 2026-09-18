@@ -110,7 +110,9 @@ func TestLoadSigningKeys(t *testing.T) {
 	signing := newTestKey(t, "test-signing-1")
 	path := writePinFile(t, root, signing)
 
-	ks, err := trust.LoadSigningKeys(path)
+	// The two-arg load binds the expected root fingerprint from an
+	// independent channel; a match loads normally.
+	ks, err := trust.LoadSigningKeys(path, fingerprintOf(root.pub))
 	if err != nil {
 		t.Fatalf("LoadSigningKeys: %v", err)
 	}
@@ -131,7 +133,7 @@ func TestLoadSigningKeys(t *testing.T) {
 func TestLoadSigningKeysRejectsUnknownKeyID(t *testing.T) {
 	root := newTestKey(t, "test-root-1")
 	signing := newTestKey(t, "test-signing-1")
-	ks, err := trust.LoadSigningKeys(writePinFile(t, root, signing))
+	ks, err := trust.LoadSigningKeys(writePinFile(t, root, signing), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func TestLoadSigningKeysRejectsUnknownKeyID(t *testing.T) {
 func TestLoadSigningKeysRejectsBadSignature(t *testing.T) {
 	root := newTestKey(t, "test-root-1")
 	signing := newTestKey(t, "test-signing-1")
-	ks, err := trust.LoadSigningKeys(writePinFile(t, root, signing))
+	ks, err := trust.LoadSigningKeys(writePinFile(t, root, signing), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +195,7 @@ func TestLoadSigningKeysRejectsUnchainedRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = signing
-	if _, err := trust.LoadSigningKeys(path); err == nil {
+	if _, err := trust.LoadSigningKeys(path, ""); err == nil {
 		t.Fatal("expected error for rotation not chained to the root")
 	}
 }
@@ -216,13 +218,13 @@ func TestLoadSigningKeysRejectsFingerprintMismatch(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trust.LoadSigningKeys(path); err == nil {
+	if _, err := trust.LoadSigningKeys(path, ""); err == nil {
 		t.Fatal("expected error for root fingerprint mismatch")
 	}
 }
 
 func TestLoadSigningKeysRejectsMissingFile(t *testing.T) {
-	if _, err := trust.LoadSigningKeys(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+	if _, err := trust.LoadSigningKeys(filepath.Join(t.TempDir(), "missing.json"), ""); err == nil {
 		t.Fatal("expected error for missing pin file")
 	}
 }
@@ -239,7 +241,7 @@ func TestLoadSigningKeysRejectsTrailingData(t *testing.T) {
 	if err := os.WriteFile(trailing, append(raw, []byte("\n{}")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trust.LoadSigningKeys(trailing); err == nil {
+	if _, err := trust.LoadSigningKeys(trailing, ""); err == nil {
 		t.Fatal("expected error for trailing data after the pin file")
 	}
 }
@@ -251,7 +253,7 @@ func TestLoadSigningKeysContractPinFile(t *testing.T) {
 		t.Fatal("cannot locate test file")
 	}
 	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "contracts", "authscope-signing-keys.json")
-	ks, err := trust.LoadSigningKeys(path)
+	ks, err := trust.LoadSigningKeys(path, "")
 	if err != nil {
 		t.Fatalf("LoadSigningKeys(contracts/authscope-signing-keys.json): %v", err)
 	}

@@ -47,7 +47,7 @@ type Authority interface {
 	GetExpansion(context.Context, string, RequestOptions) (json.RawMessage, error)
 	DecideExpansion(context.Context, string, ExpansionDecision, identity.SignedDecisionAttestation, RequestOptions) (ExpansionResult, error)
 	ReadEvents(context.Context, string, string, RequestOptions) (EventPage, error)
-	GetReceipt(context.Context, string, RequestOptions) (SignedReceipt, error)
+	GetReceipt(context.Context, string, RequestOptions) (SignedReceiptEnvelope, error)
 	GetSigningKeys(context.Context, RequestOptions) (SigningKeyHistory, error)
 	PublishGitHubCheck(context.Context, GitHubCheckRequest, RequestOptions) (GitHubCheckResult, error)
 	ReconcileOperation(context.Context, string, string, RequestOptions) (OperationResult, error)
@@ -588,12 +588,14 @@ func (c *Client) ReadEvents(ctx context.Context, missionRef, cursor string, opts
 	return EventPage{Events: wire.Items, NextCursor: wire.NextCursor}, nil
 }
 
-// GetReceipt fetches the signed execution receipt for a grant.
-func (c *Client) GetReceipt(ctx context.Context, grantID string, opts RequestOptions) (SignedReceipt, error) {
-	var out SignedReceipt
+// GetReceipt fetches the signed execution receipt envelope for a grant.
+// The envelope is returned raw: OPE verifies the signature locally and
+// never asks AuthScope whether its own receipt is valid.
+func (c *Client) GetReceipt(ctx context.Context, grantID string, opts RequestOptions) (SignedReceiptEnvelope, error) {
+	var out SignedReceiptEnvelope
 	path := "/v1/executions/" + pathEscape(grantID) + "/receipt"
 	if err := c.do(ctx, http.MethodGet, path, nil, nil, &out, opts); err != nil {
-		return SignedReceipt{}, err
+		return SignedReceiptEnvelope{}, err
 	}
 	return out, nil
 }
@@ -773,7 +775,7 @@ func (g *GatedAuthority) ReadEvents(ctx context.Context, missionRef, cursor stri
 	return g.inner.ReadEvents(ctx, missionRef, cursor, opts)
 }
 
-func (g *GatedAuthority) GetReceipt(ctx context.Context, grantID string, opts RequestOptions) (SignedReceipt, error) {
+func (g *GatedAuthority) GetReceipt(ctx context.Context, grantID string, opts RequestOptions) (SignedReceiptEnvelope, error) {
 	return g.inner.GetReceipt(ctx, grantID, opts)
 }
 

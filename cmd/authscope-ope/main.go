@@ -25,6 +25,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/launch"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
+	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/reconcile"
 	"github.com/tauliang/authscope-ope/internal/store"
 	"github.com/tauliang/authscope-ope/internal/trust"
@@ -131,7 +132,11 @@ func runServe() error {
 	// upstream authority. The service cannot open sealed envelopes (only
 	// the CLI ephemeral key opens them), but it refuses to adopt
 	// artifacts sealed under a signing key the trust pin does not know.
-	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"))
+	// The pin file digest is enforced by make contract-ready against the
+	// contract lock, so the file itself is the trust root here; the empty
+	// expected fingerprint keeps that behavior while the loader still
+	// validates the root fingerprint declared inside the file.
+	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"), "")
 	if err != nil {
 		return fmt.Errorf("signing keys: %w", err)
 	}
@@ -183,12 +188,27 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("expansion service: %w", err)
 	}
+	// The receipt service owns the pass-owned receipt loop: fetching
+	// the upstream receipt envelope, verifying it locally against the
+	// pinned signing keys, transitioning the pass only on a verified
+	// receipt, and publishing the privacy-safe GitHub check exactly
+	// once. The worker drives it; the HTTP layer serves the private
+	// view.
+	receiptSvc, err := receipt.NewService(receipt.Config{
+		Store:     st,
+		Authority: gated,
+		Keys:      keys,
+	})
+	if err != nil {
+		return fmt.Errorf("receipt service: %w", err)
+	}
 	worker, err := reconcile.NewWorker(reconcile.Config{
 		Store:        st,
 		Authority:    gated,
 		Projector:    projector,
 		Revocation:   revocationSvc,
 		Expansion:    expansionSvc,
+		Receipt:      receiptSvc,
 		InstanceID:   cfg.InstanceID,
 		WorkspaceID:  cfg.WorkspaceID,
 		PollInterval: 10 * time.Second,
@@ -216,6 +236,7 @@ func runServe() error {
 		CLIRevocation: cliRevocationSvc,
 		Projector:  projector,
 		Expansion:  expansionSvc,
+		Receipt:    receiptSvc,
 	})
 	srv := &http.Server{Addr: cfg.BindAddr, Handler: handler}
 	// A server start failure (for example, the port is taken) returns
@@ -272,7 +293,11 @@ func runLaunch(args []string) error {
 	if err != nil {
 		return err
 	}
-	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"))
+	// The pin file digest is enforced by make contract-ready against the
+	// contract lock, so the file itself is the trust root here; the empty
+	// expected fingerprint keeps that behavior while the loader still
+	// validates the root fingerprint declared inside the file.
+	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"), "")
 	if err != nil {
 		return fmt.Errorf("signing keys: %w", err)
 	}

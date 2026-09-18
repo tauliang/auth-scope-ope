@@ -66,7 +66,7 @@ func testKeyStore(t *testing.T, id string, pub ed25519.PublicKey) *trust.KeyStor
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ks, err := trust.LoadSigningKeys(path)
+	ks, err := trust.LoadSigningKeys(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}

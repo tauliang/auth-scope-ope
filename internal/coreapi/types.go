@@ -444,16 +444,20 @@ type eventPageWire struct {
 	NextCursor string         `json:"next_cursor"`
 }
 
-// SignedReceipt is the signed execution receipt.
-type SignedReceipt struct {
-	ReceiptID        string `json:"receipt_id"`
-	GrantID          string `json:"grant_id"`
-	MissionRef       string `json:"mission_ref"`
-	WorkspaceID      string `json:"workspace_id"`
-	SettlementDigest string `json:"settlement_digest"`
-	SignedAt         int64  `json:"signed_at"`
-	KeyID            string `json:"key_id"`
-	Signature        string `json:"signature"`
+// SignedReceiptEnvelope is the signed execution receipt envelope OPE
+// verifies locally. The signature covers the exact canonical payload
+// bytes; OPE never asks AuthScope whether its own receipt is valid.
+// The envelope carries no interpreted claims: every claim inside the
+// payload is checked by the receipt verifier against the local binding.
+type SignedReceiptEnvelope struct {
+	// Algorithm is the signature algorithm. Only "Ed25519" is accepted.
+	Algorithm string `json:"algorithm"`
+	// KeyID identifies the signing key; it must be valid at signing time.
+	KeyID string `json:"key_id"`
+	// Payload is the raw canonical receipt payload bytes.
+	Payload json.RawMessage `json:"payload"`
+	// Signature is the base64url Ed25519 signature over Payload.
+	Signature string `json:"signature"`
 }
 
 // SigningKeyRecord is one key in the signing-key history.

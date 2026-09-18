@@ -40,6 +40,10 @@ func (t *sqliteTx) CompleteExpansionIntent(ctx context.Context, workspaceID, exp
 	return completeExpansionIntent(ctx, t.tx, workspaceID, expansionID, decisionRef, resultMissionVersion)
 }
 
+func (t *sqliteTx) ListExpansionIntents(ctx context.Context, workspaceID, state string) ([]ExpansionIntentRecord, error) {
+	return listExpansionIntents(ctx, t.tx, workspaceID, state)
+}
+
 func (s *sqliteStore) ListExpansionIntents(ctx context.Context, workspaceID, state string) ([]ExpansionIntentRecord, error) {
 	return listExpansionIntents(ctx, s.db, workspaceID, state)
 }

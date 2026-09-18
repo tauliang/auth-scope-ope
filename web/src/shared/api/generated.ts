@@ -327,6 +327,60 @@ export interface ReadyResponse {
   status: "ready" | "not_ready";
 }
 
+export interface ReceiptCheckSummary {
+  kind: string;
+  outcome: string;
+}
+
+export interface ReceiptEnforcementSummary {
+  level: string;
+  scope: string;
+}
+
+export interface ReceiptPublicationStatus {
+  check_run_id?: string;
+  head_sha: string;
+  idempotency_key: string;
+  pull_request_number: number;
+  repository_id: number;
+  state: "in_flight" | "settled" | "disputed";
+  updated_at: string;
+}
+
+export interface ReceiptStatus {
+  pass_id: string;
+  publication?: ReceiptPublicationStatus;
+  reason_code?: "bad_signature" | "bad_key" | "bad_payload" | "bad_binding";
+  verification: "pending" | "verified" | "unverifiable";
+  view?: ReceiptView;
+}
+
+export interface ReceiptView {
+  aggregate_cost_micros?: number;
+  branch?: string;
+  budget_micros?: number;
+  checks?: ReceiptCheckSummary[];
+  expansion_decision_refs?: string[];
+  finished_at?: number;
+  grant_id: string;
+  head_sha?: string;
+  historical_enforcement?: ReceiptEnforcementSummary[];
+  issue_number?: number;
+  key_id?: string;
+  mission_ref: string;
+  mission_versions?: number[];
+  outcome: "success" | "failure";
+  pull_request_number?: number;
+  receipt_digest: string;
+  receipt_id: string;
+  repository_id?: number;
+  settlement_digest?: string;
+  signed_at?: number;
+  started_at?: number;
+  verification: string;
+  workspace_id: string;
+}
+
 export interface RevocationResult {
   containment: string;
   mission_ref: string;

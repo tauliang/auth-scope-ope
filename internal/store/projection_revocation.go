@@ -254,7 +254,7 @@ func listMissionPasses(ctx context.Context, c dbConn, workspaceID string) ([]Mis
 	var out []MissionPassRecord
 	for rows.Next() {
 		var rec MissionPassRecord
-		var runnerArgs, criteria, expires, created, updated string
+		var runnerArgs, criteria, expires, receiptPending, created, updated string
 		if err := rows.Scan(&rec.WorkspaceID, &rec.PassID, &rec.StoreRevision, &rec.DraftVersion,
 			&rec.AuthScopeMissionVersion, &rec.ConnectionID, &rec.IssueNumber, &rec.RepositoryName,
 			&rec.ProposalID, &rec.ProposalDigest, &rec.ApprovedProposalDigest,
@@ -263,7 +263,7 @@ func listMissionPasses(ctx context.Context, c dbConn, workspaceID string) ([]Mis
 			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
 			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation,
 			&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
-			&rec.AttestationDigest, &rec.RunID, &rec.Containment, &created, &updated); err != nil {
+			&rec.AttestationDigest, &rec.RunID, &rec.Containment, &receiptPending, &created, &updated); err != nil {
 			return nil, fmt.Errorf("store: list mission passes: %w", err)
 		}
 		if rec.RunnerArguments, err = decodeStringSlice(runnerArgs); err != nil {
@@ -273,6 +273,9 @@ func listMissionPasses(ctx context.Context, c dbConn, workspaceID string) ([]Mis
 			return nil, fmt.Errorf("store: list mission passes: %w", err)
 		}
 		if rec.ExpiresAt, err = parseOptionalTime(expires); err != nil {
+			return nil, fmt.Errorf("store: list mission passes: %w", err)
+		}
+		if rec.ReceiptPendingAt, err = parseOptionalTime(receiptPending); err != nil {
 			return nil, fmt.Errorf("store: list mission passes: %w", err)
 		}
 		if rec.CreatedAt, err = parseTime(created); err != nil {

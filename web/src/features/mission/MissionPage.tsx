@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Timeline } from './Timeline';
+import { ReceiptView } from './ReceiptView';
 import { RevokeButton } from './RevokeButton';
 import { ExpansionCard } from './ExpansionCard';
 import { listPendingExpansions } from '../../shared/api/client';
@@ -86,6 +87,7 @@ export function MissionPage({ passId, cliRevocationId }: { passId: string; cliRe
         </section>
       )}
       <Timeline key={timelineKey} passId={passId} />
+      <ReceiptView passId={passId} />
     </main>
   );
 }

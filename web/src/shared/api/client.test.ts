@@ -12,6 +12,7 @@ import {
   beginRevoke,
   fetchBootstrap,
   fetchHealth,
+  fetchMissionReceipt,
   fetchTimeline,
   finishCliAuthorization,
   finishRevoke,
@@ -56,6 +57,28 @@ describe('api client', () => {
     expect(health.status).toBe('ok');
     const [path] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(path).toBe('/healthz');
+  });
+
+  it('fetches the private receipt view for a pass', async () => {
+    const fake = { pass_id: 'pass-1', verification: 'pending' };
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(fake), { status: 200 }));
+
+    const got = await fetchMissionReceipt('pass-1');
+    expect(got.verification).toBe('pending');
+
+    const [path, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/v1/mission-passes/pass-1/receipt');
+    expect(init.credentials).toBe('same-origin');
+  });
+
+  it('raises ApiError when the receipt view is missing', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ title: 'not found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/problem+json' },
+      }),
+    );
+    await expect(fetchMissionReceipt('nope')).rejects.toMatchObject({ status: 404 });
   });
 
   it('begins a CLI authorization with an idempotency key', async () => {

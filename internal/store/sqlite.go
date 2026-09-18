@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql migrations/009_event_projections.sql migrations/010_expansions.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql migrations/009_event_projections.sql migrations/010_expansions.sql migrations/011_receipts.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -40,6 +40,7 @@ var migrations = []struct {
 	{"008_launch_exchange", "migrations/008_launch_exchange.sql"},
 	{"009_event_projections", "migrations/009_event_projections.sql"},
 	{"010_expansions", "migrations/010_expansions.sql"},
+	{"011_receipts", "migrations/011_receipts.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -282,6 +283,10 @@ func (t *sqliteTx) AttachWorkloadIdentity(ctx context.Context, expected, digest 
 
 func (t *sqliteTx) PutConnection(ctx context.Context, rec ConnectionRecord) error {
 	return putConnection(ctx, t.tx, rec)
+}
+
+func (t *sqliteTx) GetConnection(ctx context.Context, workspaceID, connectionID string) (ConnectionRecord, error) {
+	return getConnection(ctx, t.tx, workspaceID, connectionID)
 }
 
 func (s *sqliteStore) GetGitHubHandoff(ctx context.Context, workspaceID, handoffID string) (GitHubHandoffRecord, error) {
@@ -872,6 +877,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		    attestation_digest = ?,
 		    run_id = ?,
 		    containment = ?,
+		    receipt_pending_at = ?,
 		    updated_at = ?
 		WHERE workspace_id = ? AND pass_id = ? AND store_revision = ?`,
 		rec.DraftVersion, rec.AuthScopeMissionVersion,
@@ -883,7 +889,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		rec.Objective, criteria, rec.ShapedDraftJSON,
 		rec.State, rec.Reconciliation,
 		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef,
-		rec.AttestationDigest, rec.RunID, rec.Containment, now,
+		rec.AttestationDigest, rec.RunID, rec.Containment, formatOptionalTime(rec.ReceiptPendingAt), now,
 		rec.WorkspaceID, rec.PassID, expectedStoreRevision)
 	if err != nil {
 		return fmt.Errorf("store: put mission pass: %w", err)
@@ -907,9 +913,9 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		 expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
 		 shaped_draft_json, state, reconciliation,
 		 mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
-		 containment,
+		 containment, receipt_pending_at,
 		 created_at, updated_at)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.WorkspaceID, rec.PassID, rec.DraftVersion, rec.AuthScopeMissionVersion,
 		rec.ConnectionID, rec.IssueNumber, rec.RepositoryName,
 		rec.ProposalID, rec.ProposalDigest, rec.ApprovedProposalDigest,
@@ -918,7 +924,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros, rec.Objective, criteria,
 		rec.ShapedDraftJSON, rec.State, rec.Reconciliation,
 		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef, rec.AttestationDigest, rec.RunID,
-		rec.Containment,
+		rec.Containment, formatOptionalTime(rec.ReceiptPendingAt),
 		formatTime(rec.CreatedAt), now)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -937,12 +943,12 @@ const missionPassColumns = `workspace_id, pass_id, store_revision, draft_version
 	expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
 	shaped_draft_json, state, reconciliation,
 	mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
-	containment,
+	containment, receipt_pending_at,
 	created_at, updated_at`
 
 func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (MissionPassRecord, error) {
 	var rec MissionPassRecord
-	var runnerArgs, criteria, expires, created, updated string
+	var runnerArgs, criteria, expires, receiptPending, created, updated string
 	err := c.QueryRowContext(ctx, `SELECT `+missionPassColumns+`
 		FROM mission_passes WHERE workspace_id = ? AND pass_id = ?`, workspaceID, passID).
 		Scan(&rec.WorkspaceID, &rec.PassID, &rec.StoreRevision, &rec.DraftVersion,
@@ -953,7 +959,7 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
 			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation,
 			&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
-			&rec.AttestationDigest, &rec.RunID, &rec.Containment, &created, &updated)
+			&rec.AttestationDigest, &rec.RunID, &rec.Containment, &receiptPending, &created, &updated)
 	if err == sql.ErrNoRows {
 		return MissionPassRecord{}, fmt.Errorf("%w: mission pass %q", ErrNotFound, passID)
 	}
@@ -967,6 +973,9 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
 	}
 	if rec.ExpiresAt, err = parseOptionalTime(expires); err != nil {
+		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
+	}
+	if rec.ReceiptPendingAt, err = parseOptionalTime(receiptPending); err != nil {
 		return MissionPassRecord{}, fmt.Errorf("store: get mission pass: %w", err)
 	}
 	if rec.CreatedAt, err = parseTime(created); err != nil {

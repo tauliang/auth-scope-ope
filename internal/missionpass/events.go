@@ -72,12 +72,12 @@ const (
 // Fixed reason-code enum for events that carry one. Revocation reasons
 // are a subset shared with the revocation flow.
 const (
-	EventReasonFounderRequested = "founder_requested"
-	EventReasonSafetyConcern    = "safety_concern"
+	EventReasonFounderRequested  = "founder_requested"
+	EventReasonSafetyConcern     = "safety_concern"
 	EventReasonMissionSuperseded = "mission_superseded"
-	EventReasonPolicyViolation  = "policy_violation"
-	EventReasonExpired          = "expired"
-	EventReasonUpstreamError    = "upstream_error"
+	EventReasonPolicyViolation   = "policy_violation"
+	EventReasonExpired           = "expired"
+	EventReasonUpstreamError     = "upstream_error"
 )
 
 // ErrProjectionIncompatible reports that an unknown authenticated event
@@ -114,12 +114,12 @@ var validCheckOutcomes = map[string]bool{
 }
 
 var validEventReasons = map[string]bool{
-	EventReasonFounderRequested: true,
-	EventReasonSafetyConcern:    true,
+	EventReasonFounderRequested:  true,
+	EventReasonSafetyConcern:     true,
 	EventReasonMissionSuperseded: true,
-	EventReasonPolicyViolation:  true,
-	EventReasonExpired:          true,
-	EventReasonUpstreamError:    true,
+	EventReasonPolicyViolation:   true,
+	EventReasonExpired:           true,
+	EventReasonUpstreamError:     true,
 }
 
 // maxEventPayloadBytes caps one authoritative event payload. Anything
@@ -579,10 +579,12 @@ func validateReason(r string) error {
 
 // applyEventEffect applies the pass-state effect of one projected event.
 // Run outcomes move to outcome_pending, never directly to terminal
-// completion or failure. A locally verified receipt moves outcome_pending
-// to completed or failed. Revocation and expiry move to their terminal
-// states when the transition is legal; events for an already-terminal
-// pass are no-ops. It reports whether the pass record changed.
+// completion or failure. The receipt-ready signal is recorded on the
+// pass but never terminalizes it: only a locally verified receipt,
+// handled by the receipt service, moves outcome_pending to completed
+// or failed. Revocation and expiry move to their terminal states when
+// the transition is legal; events for an already-terminal pass are
+// no-ops. It reports whether the pass record changed.
 func (p *EventProjector) applyEventEffect(ctx context.Context, tx store.Tx, pass *store.MissionPassRecord, safe SafeEvent) (bool, error) {
 	switch safe.Type {
 	case EventRunSucceeded, EventRunFailed:
@@ -633,11 +635,15 @@ func (p *EventProjector) movePass(pass *store.MissionPassRecord, to PassState, f
 	return true, nil
 }
 
-// applyReceipt verifies a receipt locally: the receipt resource digest
-// must match the most recent projected run outcome, and the pass must be
-// outcome_pending. Only a locally verified receipt enters completed or
-// failed. A receipt that does not verify fails closed so the mismatch is
-// investigated instead of silently skipped.
+// applyReceipt records the upstream receipt-ready signal: the receipt
+// resource digest must match the most recent projected run outcome, and
+// the pass must be outcome_pending. The signal is recorded on the pass
+// and the receipt service verifies the receipt locally; only a locally
+// verified receipt moves the pass to completed or failed. An invalid
+// receipt leaves the pass in outcome_pending, so this projection never
+// terminalizes the pass. A receipt that does not match the projected
+// run outcome fails closed so the mismatch is investigated instead of
+// silently skipped.
 func (p *EventProjector) applyReceipt(ctx context.Context, tx store.Tx, pass *store.MissionPassRecord, safe SafeEvent) (bool, error) {
 	if isTerminalPassState(PassState(pass.State)) {
 		return false, nil
@@ -655,21 +661,11 @@ func (p *EventProjector) applyReceipt(ctx context.Context, tx store.Tx, pass *st
 	if outcome.ResourceDigest == "" || outcome.ResourceDigest != safe.ResourceDigest {
 		return false, fmt.Errorf("receipt digest does not match the projected run outcome")
 	}
-	var to PassState
-	switch outcome.Type {
-	case EventRunSucceeded:
-		to = PassCompleted
-	case EventRunFailed:
-		to = PassFailed
-	default:
-		return false, fmt.Errorf("unexpected run outcome type %q", outcome.Type)
+	if pass.ReceiptPendingAt.IsZero() {
+		pass.ReceiptPendingAt = time.Now().UTC()
+		return true, nil
 	}
-	if err := Transition(PassState(pass.State), to); err != nil {
-		return false, err
-	}
-	pass.State = string(to)
-	pass.Reconciliation = string(ReconciliationSettled)
-	return true, nil
+	return false, nil
 }
 
 // latestRunOutcome returns the most recent projected run outcome event.

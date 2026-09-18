@@ -385,7 +385,7 @@ func TestApplyPageRunOutcomeMovesToOutcomePending(t *testing.T) {
 	}
 }
 
-func TestApplyPageReceiptVerifiesAndCompletes(t *testing.T) {
+func TestApplyPageReceiptReadyRecordsSignalWithoutTerminalizing(t *testing.T) {
 	st := openEventStore(t)
 	seedEventPass(t, st, "ws-test", "pass-1", PassRunning)
 	proj := NewEventProjector(st, &stubProjectionGate{})
@@ -401,8 +401,11 @@ func TestApplyPageReceiptVerifiesAndCompletes(t *testing.T) {
 		t.Fatalf("ApplyPage: %v", err)
 	}
 	pass, _ := st.GetMissionPass(ctx, "ws-test", "pass-1")
-	if pass.State != string(PassCompleted) {
-		t.Fatalf("state = %q, want completed", pass.State)
+	if pass.State != string(PassOutcomePending) {
+		t.Fatalf("state = %q, want outcome_pending until the receipt is verified locally", pass.State)
+	}
+	if pass.ReceiptPendingAt.IsZero() {
+		t.Fatalf("receipt-ready signal was not recorded on the pass")
 	}
 }
 

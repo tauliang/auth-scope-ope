@@ -40,16 +40,16 @@ func eventRoutes(mux *http.ServeMux, deps Dependencies, projector *missionpass.E
 // timelineResponse is the wire shape of the safe timeline. Events are
 // the projected safe events; cursor walks the projection forward.
 type timelineResponse struct {
-	PassID                string                `json:"pass_id"`
-	State                 string                `json:"state"`
-	Reconciliation        string                `json:"reconciliation"`
-	RepositoryName        string                `json:"repository_name,omitempty"`
+	PassID                string                  `json:"pass_id"`
+	State                 string                  `json:"state"`
+	Reconciliation        string                  `json:"reconciliation"`
+	RepositoryName        string                  `json:"repository_name,omitempty"`
 	Events                []missionpass.SafeEvent `json:"events"`
-	Cursor                string                `json:"cursor"`
-	Compatible            bool                  `json:"compatible"`
-	Stale                 bool                  `json:"stale"`
-	IncompatibilityReason string                `json:"incompatibility_reason,omitempty"`
-	Containment           string                `json:"containment"`
+	Cursor                string                  `json:"cursor"`
+	Compatible            bool                    `json:"compatible"`
+	Stale                 bool                    `json:"stale"`
+	IncompatibilityReason string                  `json:"incompatibility_reason,omitempty"`
+	Containment           string                  `json:"containment"`
 }
 
 func handleTimelineGet(projector *missionpass.EventProjector, revocation *missionpass.RevocationService, w http.ResponseWriter, r *http.Request, p authn.Principal) {

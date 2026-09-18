@@ -10,10 +10,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"strconv"
 	"testing"
 	"time"
 
@@ -118,7 +118,7 @@ func (f *fakeRevokeAuthority) RevokeMission(_ context.Context, missionRef string
 		// response was lost.
 		rev := coreapi.Revocation{
 			MissionRef: missionRef, Revoked: true,
-			RevokedAt: fixtureClock.Add(time.Minute).UnixMilli(),
+			RevokedAt:   fixtureClock.Add(time.Minute).UnixMilli(),
 			Containment: f.containmentOrDefault(),
 		}
 		f.revokedByKey[opts.IdempotencyKey] = rev
@@ -136,7 +136,7 @@ func (f *fakeRevokeAuthority) RevokeMission(_ context.Context, missionRef string
 	}
 	rev := coreapi.Revocation{
 		MissionRef: missionRef, Revoked: true,
-		RevokedAt: fixtureClock.Add(time.Minute).UnixMilli(),
+		RevokedAt:   fixtureClock.Add(time.Minute).UnixMilli(),
 		Containment: f.containmentOrDefault(),
 	}
 	f.revokedByKey[opts.IdempotencyKey] = rev
@@ -317,10 +317,10 @@ func newRevocationFixture(t *testing.T) *revokeFixture {
 	if err := st.WithTx(ctx, func(tx store.Tx) error {
 		return tx.PutMissionPass(ctx, store.MissionPassRecord{
 			WorkspaceID: "ws-test", PassID: passID,
-			State: string(PassRunning),
+			State:      string(PassRunning),
 			MissionRef: "mission-1", AuthScopeMissionVersion: 3,
 			Reconciliation: string(ReconciliationSettled),
-			CreatedAt: fixtureClock,
+			CreatedAt:      fixtureClock,
 		}, 0)
 	}); err != nil {
 		t.Fatalf("seed pass: %v", err)
@@ -744,11 +744,11 @@ func newCLIRevocationFixture(t *testing.T) (*revokeFixture, *CLIRevocationServic
 	t.Helper()
 	fx := newRevocationFixture(t)
 	svc, err := NewCLIRevocationService(CLIRevocationConfig{
-		Store:      fx.store,
-		Revocation: fx.svc,
-		WorkspaceID: "ws-test",
-		BrowserURL: "https://ope.example.com",
-		Clock:      func() time.Time { return fixtureClock },
+		Store:        fx.store,
+		Revocation:   fx.svc,
+		WorkspaceID:  "ws-test",
+		BrowserURL:   "https://ope.example.com",
+		Clock:        func() time.Time { return fixtureClock },
 		NewRequestID: incrementingTestRequestID(),
 		NewCode:      func() (string, error) { return "code-raw-test-1", nil },
 		NewResultRef: func() (string, error) { return "revres-test-1", nil },

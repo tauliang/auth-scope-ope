@@ -932,8 +932,21 @@ func TestClientDecodesTypedResponses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetReceipt: %v", err)
 	}
-	if receipt.ReceiptID != "receipt-1" {
-		t.Fatalf("receipt = %+v", receipt)
+	if receipt.Algorithm != "Ed25519" || receipt.KeyID != "ask-1" {
+		t.Fatalf("receipt envelope = %+v", receipt)
+	}
+	var payload struct {
+		ReceiptID        string `json:"receipt_id"`
+		SettlementDigest string `json:"settlement_digest"`
+	}
+	if err := json.Unmarshal(receipt.Payload, &payload); err != nil {
+		t.Fatalf("decode receipt payload: %v", err)
+	}
+	if payload.ReceiptID != "receipt-1" {
+		t.Fatalf("receipt payload = %+v", payload)
+	}
+	if payload.SettlementDigest == "" {
+		t.Fatalf("receipt payload is missing the settlement digest: %+v", payload)
 	}
 	if req := f.lastRequest(); req.path != "/v1/executions/grant-1/receipt" {
 		t.Fatalf("path = %s", req.path)

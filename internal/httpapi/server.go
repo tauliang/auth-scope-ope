@@ -13,6 +13,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/expansion"
 	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
+	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -63,6 +64,11 @@ type Dependencies struct {
 	// not exercise the timeline route; it is registered only when it is
 	// present.
 	Projector *missionpass.EventProjector
+	// Receipt serves the authenticated private receipt view. Nil in
+	// tests that do not exercise the receipt route; the route is
+	// registered only when it is present. There is no manual check
+	// publication endpoint: publication is owned by the worker.
+	Receipt *receipt.Service
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2
@@ -100,6 +106,7 @@ func New(deps Dependencies) http.Handler {
 	gh := newGitHubServices(deps)
 	githubRoutes(mux, deps, gh)
 	passRoutes(mux, deps, gh)
+	receiptRoutes(mux, deps)
 	cliRoutes(mux, deps)
 
 	return withSecurityHeaders(http.MaxBytesHandler(mux, maxBodyBytes))

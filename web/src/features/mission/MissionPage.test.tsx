@@ -6,13 +6,14 @@ import {
   missionPassIdFromPath,
 } from './MissionPage';
 import * as client from '../../shared/api/client';
-import type { TimelineResponse } from '../../shared/api/generated';
+import type { ReceiptStatus, TimelineResponse } from '../../shared/api/generated';
 
 vi.mock('../../shared/api/client', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../shared/api/client')>();
   return {
     ...original,
     fetchTimeline: vi.fn(),
+    fetchMissionReceipt: vi.fn(),
     listPendingExpansions: vi.fn(),
   };
 });
@@ -33,6 +34,9 @@ function timeline(): TimelineResponse {
 beforeEach(() => {
   vi.mocked(client.fetchTimeline).mockReset();
   vi.mocked(client.fetchTimeline).mockResolvedValue(timeline());
+  vi.mocked(client.fetchMissionReceipt).mockReset();
+  const pending: ReceiptStatus = { pass_id: 'pass-1', verification: 'pending' };
+  vi.mocked(client.fetchMissionReceipt).mockResolvedValue(pending);
   vi.mocked(client.listPendingExpansions).mockReset();
   vi.mocked(client.listPendingExpansions).mockResolvedValue([]);
 });
@@ -74,9 +78,7 @@ describe('MissionPage CLI handoff', () => {
     render(<MissionPage passId="pass-1" cliRevocationId="req-1" />);
 
     expect(await screen.findByLabelText('mission timeline')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'The CLI requested this revocation.',
-    );
+    expect(screen.getByText(/The CLI requested this revocation/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Revoke mission' })).toBeInTheDocument();
   });
 
@@ -85,5 +87,12 @@ describe('MissionPage CLI handoff', () => {
 
     expect(await screen.findByLabelText('mission timeline')).toBeInTheDocument();
     expect(screen.queryByText(/The CLI requested this revocation/)).not.toBeInTheDocument();
+  });
+
+  it('shows the private receipt view on the mission page', async () => {
+    render(<MissionPage passId="pass-1" cliRevocationId={null} />);
+
+    expect(await screen.findByLabelText('receipt')).toBeInTheDocument();
+    expect(await screen.findByText(/Receipt pending/)).toBeInTheDocument();
   });
 });

@@ -33,9 +33,9 @@ import (
 
 // Fixed normalized revocation reason enum.
 const (
-	RevocationReasonFounderRequested   = "founder_requested"
-	RevocationReasonSafetyConcern      = "safety_concern"
-	RevocationReasonMissionSuperseded  = "mission_superseded"
+	RevocationReasonFounderRequested  = "founder_requested"
+	RevocationReasonSafetyConcern     = "safety_concern"
+	RevocationReasonMissionSuperseded = "mission_superseded"
 )
 
 var validRevocationReasons = map[string]bool{
@@ -718,14 +718,14 @@ func validateRevocationChallenge(challenge string) error {
 // revocation-result reference and the fixed containment state. No CLI
 // credential or session is issued or stored.
 type CLIRevocationService struct {
-	store       store.Store
-	revocation  *RevocationService
-	workspaceID string
-	browserURL  string
-	clock       func() time.Time
-	requestTTL  time.Duration
-	newID       func() (string, error)
-	newCode     func() (string, error)
+	store        store.Store
+	revocation   *RevocationService
+	workspaceID  string
+	browserURL   string
+	clock        func() time.Time
+	requestTTL   time.Duration
+	newID        func() (string, error)
+	newCode      func() (string, error)
 	newResultRef func() (string, error)
 }
 
@@ -858,9 +858,9 @@ func (s *CLIRevocationService) Register(ctx context.Context, req CLIRevocationRe
 			existing.CodeChallenge == req.CodeChallenge && existing.RedirectURI == redirectURI {
 			return &CLIRevocationStart{
 				RequestID:       existing.RequestID,
-				BrowserURL:        s.browserURLFor(existing.RequestID, req.PassID),
-				CanonicalDigest:   existing.CanonicalDigest,
-				ExpiresAt:         existing.ExpiresAt,
+				BrowserURL:      s.browserURLFor(existing.RequestID, req.PassID),
+				CanonicalDigest: existing.CanonicalDigest,
+				ExpiresAt:       existing.ExpiresAt,
 			}, nil
 		}
 		return nil, fmt.Errorf("%w: request changed since registration", ErrCLIRevocationConflict)

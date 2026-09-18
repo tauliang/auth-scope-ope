@@ -97,7 +97,7 @@ func newEnvelopeKeys(t *testing.T) envelopeKeys {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ks, err := trust.LoadSigningKeys(path)
+	ks, err := trust.LoadSigningKeys(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}

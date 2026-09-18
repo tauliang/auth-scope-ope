@@ -32,6 +32,7 @@ import type {
   ExpansionDecideBeginRequest,
   ExpansionDecideFinishRequest,
   PendingExpansion,
+  ReceiptStatus,
   SessionResponse,
   TimelineResponse,
 } from './generated';
@@ -371,6 +372,16 @@ export function fetchMissionEvents(
   const query = params.toString();
   const path = `/api/v1/mission-passes/${encodeURIComponent(passId)}/events${query ? `?${query}` : ''}`;
   return request<TimelineResponse>(path);
+}
+
+// fetchMissionReceipt reads the private verified receipt view of a
+// mission pass. The response carries only the fixed verified
+// projection: verification state, receipt digest, outcome, versions,
+// checks, enforcement, and publication state. It never carries the
+// raw envelope or private detail.
+export function fetchMissionReceipt(passId: string): Promise<ReceiptStatus> {
+  const path = `/api/v1/mission-passes/${encodeURIComponent(passId)}/receipt`;
+  return request<ReceiptStatus>(path);
 }
 
 // fetchTimeline is the legacy name for fetchMissionEvents.

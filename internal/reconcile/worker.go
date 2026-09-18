@@ -2,9 +2,12 @@
 // state settled against the authority: it projects authoritative event
 // pages into the safe local timeline, reconciles ambiguous revocation
 // intents by their original idempotency keys without ever re-issuing a
-// revocation, and drives passes to their terminal receipt states. One
-// worker holds the instance lease at a time; the lease heartbeat keeps
-// it alive and graceful shutdown releases it.
+// revocation, and runs the pass-owned receipt loop of fetching the
+// upstream receipt envelope, verifying it locally, transitioning the
+// pass only on a verified receipt, and publishing the privacy-safe
+// GitHub check exactly once. One worker holds the instance lease at a
+// time; the lease heartbeat keeps it alive and graceful shutdown
+// releases it.
 package reconcile
 
 import (
@@ -20,6 +23,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/expansion"
 	"github.com/tauliang/authscope-ope/internal/missionpass"
+	"github.com/tauliang/authscope-ope/internal/receipt"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -54,40 +58,52 @@ type ExpansionReconciler interface {
 	ReconcileExpansion(ctx context.Context, workspaceID, expansionID string) (*expansion.DecisionResult, error)
 }
 
+// ReceiptService owns the pass-owned receipt loop: fetching the
+// upstream receipt envelope, verifying it locally, transitioning the
+// pass only on a verified receipt, and publishing the privacy-safe
+// GitHub check exactly once. *receipt.Service satisfies it.
+type ReceiptService interface {
+	VerifyReceipt(ctx context.Context, workspaceID, passID string) (*receipt.ReceiptView, error)
+	PublishVerifiedCheck(ctx context.Context, workspaceID, passID string) error
+	ReconcilePublication(ctx context.Context, workspaceID, passID string) error
+}
+
 // Config wires the worker.
 type Config struct {
-	Store       store.Store
-	Authority   coreapi.Authority
-	Projector   *missionpass.EventProjector
-	Revocation  RevocationReconciler
-	Expansion   ExpansionReconciler
-	InstanceID  string
-	WorkspaceID string
+	Store        store.Store
+	Authority    coreapi.Authority
+	Projector    *missionpass.EventProjector
+	Revocation   RevocationReconciler
+	Expansion    ExpansionReconciler
+	Receipt      ReceiptService
+	InstanceID   string
+	WorkspaceID  string
 	PollInterval time.Duration
-	LeaseTTL    time.Duration
-	Clock       func() time.Time
-	Log         func(format string, args ...any)
+	LeaseTTL     time.Duration
+	Clock        func() time.Time
+	Log          func(format string, args ...any)
 }
 
 // Worker is the leased reconciliation worker.
 type Worker struct {
-	store       store.Store
-	authority   coreapi.Authority
-	projector   *missionpass.EventProjector
-	revocation  RevocationReconciler
-	expansion   ExpansionReconciler
-	instanceID  string
-	owner       string
-	workspaceID string
+	store        store.Store
+	authority    coreapi.Authority
+	projector    *missionpass.EventProjector
+	revocation   RevocationReconciler
+	expansion    ExpansionReconciler
+	instanceID   string
+	owner        string
+	workspaceID  string
 	pollInterval time.Duration
-	leaseTTL    time.Duration
-	clock       func() time.Time
-	log         func(format string, args ...any)
+	leaseTTL     time.Duration
+	clock        func() time.Time
+	log          func(format string, args ...any)
 
 	mu           sync.Mutex
 	backoffUntil map[string]time.Time
 	backoffCount map[string]int
 	incompatible map[string]bool
+	receipt      ReceiptService
 }
 
 // newOwnerID mints a unique owner identity per worker process so two
@@ -135,6 +151,7 @@ func NewWorker(cfg Config) (*Worker, error) {
 		projector:    cfg.Projector,
 		revocation:   cfg.Revocation,
 		expansion:    cfg.Expansion,
+		receipt:      cfg.Receipt,
 		instanceID:   cfg.InstanceID,
 		owner:        owner,
 		workspaceID:  cfg.WorkspaceID,
@@ -236,7 +253,12 @@ func (w *Worker) releaseLease() {
 }
 
 // poll runs one reconciliation sweep: event projection for every active
-// pass, then ambiguous revocation intent reconciliation.
+// pass, local receipt verification and check publication for passes
+// awaiting their receipt, then ambiguous revocation and expansion
+// intent reconciliation, then check-publication reconciliation. The
+// receipt sweep runs before the terminal states are considered: a pass
+// that just verified and transitioned still gets its publication
+// reconciled on the same and later sweeps.
 func (w *Worker) poll(ctx context.Context) {
 	passes, err := w.store.ListMissionPasses(ctx, w.workspaceID)
 	if err != nil {
@@ -263,8 +285,77 @@ func (w *Worker) poll(ctx context.Context) {
 		}
 		w.clearFailure(pass.PassID)
 	}
+	w.verifyReceipts(ctx)
 	w.reconcileRevocations(ctx)
 	w.reconcileExpansions(ctx)
+	w.reconcileCheckPublications(ctx)
+}
+
+// PollOnce runs a single reconciliation sweep. It is the testable unit
+// of the worker loop; errors are logged, not returned.
+func (w *Worker) PollOnce(ctx context.Context) error {
+	w.poll(ctx)
+	return nil
+}
+
+// verifyReceipts runs the pass-owned receipt loop for passes awaiting
+// their receipt: fetch the envelope, verify it locally, transition the
+// pass only on a verified receipt, and publish the privacy-safe GitHub
+// check. A missing upstream receipt is not an error; an invalid receipt
+// leaves the pass in outcome_pending and is logged, not retried in a
+// hot loop.
+func (w *Worker) verifyReceipts(ctx context.Context) {
+	if w.receipt == nil {
+		return
+	}
+	passes, err := w.store.ListMissionPasses(ctx, w.workspaceID)
+	if err != nil {
+		w.log("reconcile: list passes for receipt sweep: %v", err)
+		return
+	}
+	for i := range passes {
+		pass := passes[i]
+		if missionpass.PassState(pass.State) != missionpass.PassOutcomePending {
+			continue
+		}
+		view, err := w.receipt.VerifyReceipt(ctx, w.workspaceID, pass.PassID)
+		if err != nil {
+			if errors.Is(err, receipt.ErrReceiptUnverifiable) {
+				w.log("reconcile: pass %s receipt unverifiable: %v", pass.PassID, err)
+				continue
+			}
+			w.log("reconcile: pass %s receipt verify: %v", pass.PassID, err)
+			continue
+		}
+		if view == nil {
+			continue
+		}
+		if err := w.receipt.PublishVerifiedCheck(ctx, w.workspaceID, pass.PassID); err != nil {
+			w.log("reconcile: pass %s publish check: %v", pass.PassID, err)
+		}
+	}
+}
+
+// reconcileCheckPublications settles in-flight check publications
+// against the upstream operation state. It runs even after the pass has
+// gone terminal, so a check stuck in flight still settles; a terminally
+// failed upstream operation disputes the intent instead of retrying
+// forever.
+func (w *Worker) reconcileCheckPublications(ctx context.Context) {
+	if w.receipt == nil {
+		return
+	}
+	intents, err := w.store.ListCheckPublications(ctx, w.workspaceID, store.CheckPublicationInFlight)
+	if err != nil {
+		w.log("reconcile: list check publications: %v", err)
+		return
+	}
+	for i := range intents {
+		intent := intents[i]
+		if err := w.receipt.ReconcilePublication(ctx, intent.WorkspaceID, intent.PassID); err != nil {
+			w.log("reconcile: check publication %s: %v", intent.IdempotencyKey, err)
+		}
+	}
 }
 
 // reconcilableState reports the pass states the worker polls: missions
@@ -280,10 +371,10 @@ func reconcilableState(state string) bool {
 }
 
 // projectPass pages authoritative events for one pass and projects them
-// into the safe local timeline. Receipt events carry their resource
-// digest, and the projector verifies it locally against the latest run
-// outcome before moving the pass to completed or failed: only a locally
-// verified receipt settles the final state.
+// into the safe local timeline. The receipt-ready signal is recorded on
+// the pass by the projector, but the pass never terminalizes there: the
+// receipt service verifies the receipt envelope locally and owns the
+// terminal transition.
 func (w *Worker) projectPass(ctx context.Context, pass store.MissionPassRecord) error {
 	if pass.MissionRef == "" {
 		return nil

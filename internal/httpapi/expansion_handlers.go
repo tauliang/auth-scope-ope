@@ -120,7 +120,7 @@ type expansionFinishRequest struct {
 }
 
 type expansionListResponse struct {
-	PassID     string                      `json:"pass_id"`
+	PassID     string                       `json:"pass_id"`
 	Expansions []expansion.PendingExpansion `json:"expansions"`
 }
 

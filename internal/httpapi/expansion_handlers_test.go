@@ -32,16 +32,16 @@ import (
 type expansionStubAuthority struct {
 	*stubPassAuthority
 
-	mu           sync.Mutex
-	expansions   []coreapi.Expansion
-	deltas       map[string]json.RawMessage
-	decideErr    error
+	mu             sync.Mutex
+	expansions     []coreapi.Expansion
+	deltas         map[string]json.RawMessage
+	decideErr      error
 	failDecideOnce error
-	decideCalls  int
-	decideKeys   []string
-	decidedByKey map[string]coreapi.ExpansionResult
-	expected     expansion.ExpansionBinding
-	tamper       func(*identity.SignedDecisionAttestation)
+	decideCalls    int
+	decideKeys     []string
+	decidedByKey   map[string]coreapi.ExpansionResult
+	expected       expansion.ExpansionBinding
+	tamper         func(*identity.SignedDecisionAttestation)
 }
 
 func (s *expansionStubAuthority) ListExpansions(_ context.Context, missionRef string, _ coreapi.RequestOptions) ([]coreapi.Expansion, error) {
@@ -352,11 +352,11 @@ func TestExpansionBeginFinishApproveOnce(t *testing.T) {
 		t.Fatalf("finish: status %d body %s", rec.Code, rec.Body.String())
 	}
 	var res struct {
-		ExpansionID          string `json:"expansion_id"`
-		Decision             string `json:"decision"`
-		DecisionRef          string `json:"decision_ref"`
-		AuthScopeMissionVersion int64 `json:"authscope_mission_version"`
-		State                string `json:"state"`
+		ExpansionID             string `json:"expansion_id"`
+		Decision                string `json:"decision"`
+		DecisionRef             string `json:"decision_ref"`
+		AuthScopeMissionVersion int64  `json:"authscope_mission_version"`
+		State                   string `json:"state"`
 	}
 	decodeBody(t, rec, &res)
 	if res.Decision != "approve_once" {

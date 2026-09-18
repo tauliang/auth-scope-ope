@@ -978,6 +978,44 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/receipt:
+    get:
+      operationId: missionPassReceipt
+      summary: Read the private verified receipt view of a mission pass
+      description: >
+        Returns the privacy-filtered receipt status for the pass:
+        pending while the upstream receipt is absent, the fixed
+        verified projection after local verification, or the fixed
+        unverifiable reason code. The view never carries the raw
+        envelope, issue bodies, logs, patches, transcripts, private
+        detail URLs, or secrets. Requires a founder session. There is
+        no manual check publication endpoint; the worker publishes the
+        privacy-safe GitHub check automatically.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The private receipt view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptStatus'
+        '401':
+          description: Authentication required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
   /api/v1/mission-passes/{id}/revoke/begin:
     post:
       operationId: missionPassRevokeBegin
@@ -1917,6 +1955,128 @@ components:
         containment:
           type: string
           description: The fixed containment state for a revoked pass.
+    ReceiptStatus:
+      type: object
+      required: [pass_id, verification]
+      properties:
+        pass_id:
+          type: string
+        verification:
+          type: string
+          description: One of pending, verified, or unverifiable.
+          enum: [pending, verified, unverifiable]
+        reason_code:
+          type: string
+          description: The fixed unverifiable reason code, when verification is unverifiable.
+          enum: [bad_signature, bad_key, bad_payload, bad_binding]
+        view:
+          $ref: '#/components/schemas/ReceiptView'
+        publication:
+          $ref: '#/components/schemas/ReceiptPublicationStatus'
+    ReceiptView:
+      type: object
+      required: [verification, receipt_id, grant_id, mission_ref, workspace_id, receipt_digest, outcome]
+      properties:
+        verification:
+          type: string
+        receipt_id:
+          type: string
+        grant_id:
+          type: string
+        mission_ref:
+          type: string
+        workspace_id:
+          type: string
+        key_id:
+          type: string
+          description: The signing key that was valid when the receipt was signed.
+        signed_at:
+          type: integer
+          format: int64
+        receipt_digest:
+          type: string
+          description: sha256 hex of the exact canonical payload bytes.
+        settlement_digest:
+          type: string
+          description: The signed cumulative budget settlement digest.
+        outcome:
+          type: string
+          enum: [success, failure]
+        mission_versions:
+          type: array
+          items:
+            type: integer
+        expansion_decision_refs:
+          type: array
+          items:
+            type: string
+        repository_id:
+          type: integer
+        issue_number:
+          type: integer
+        branch:
+          type: string
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptCheckSummary'
+        started_at:
+          type: integer
+          format: int64
+        finished_at:
+          type: integer
+          format: int64
+        aggregate_cost_micros:
+          type: integer
+          format: int64
+        budget_micros:
+          type: integer
+          format: int64
+        historical_enforcement:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptEnforcementSummary'
+    ReceiptCheckSummary:
+      type: object
+      required: [kind, outcome]
+      properties:
+        kind:
+          type: string
+        outcome:
+          type: string
+    ReceiptEnforcementSummary:
+      type: object
+      required: [scope, level]
+      properties:
+        scope:
+          type: string
+        level:
+          type: string
+    ReceiptPublicationStatus:
+      type: object
+      required: [state, idempotency_key, repository_id, pull_request_number, head_sha, updated_at]
+      properties:
+        state:
+          type: string
+          description: One of in_flight, settled, or disputed.
+          enum: [in_flight, settled, disputed]
+        check_run_id:
+          type: string
+        idempotency_key:
+          type: string
+        repository_id:
+          type: integer
+        pull_request_number:
+          type: integer
+        head_sha:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
     RevokeBeginRequest:
       type: object
       required: [reason]

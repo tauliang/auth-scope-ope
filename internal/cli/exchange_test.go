@@ -75,7 +75,7 @@ func sealTestEnvelope(t *testing.T, runnerExe string) (sealed []byte, bundle *cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys, err = trust.LoadSigningKeys(writeRootPinFile(t, "root-1", pub))
+	keys, err = trust.LoadSigningKeys(writeRootPinFile(t, "root-1", pub), "")
 	if err != nil {
 		t.Fatal(err)
 	}

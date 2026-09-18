@@ -105,8 +105,8 @@ func (s *stubPassAuthority) verifyRevocationAttestation(att identity.SignedDecis
 
 // validRevocationReasons mirrors the service's fixed enum for the stub.
 var validRevocationReasons = map[string]bool{
-	"founder_requested": true,
-	"safety_concern":    true,
+	"founder_requested":  true,
+	"safety_concern":     true,
 	"mission_superseded": true,
 }
 
@@ -364,10 +364,10 @@ func TestCLIRevocationLoopbackFlow(t *testing.T) {
 		"Host":         "ope.example.com",
 		"Content-Type": "application/json",
 	}, map[string]any{
-		"code":           code,
-		"code_verifier":  h.verifier,
-		"redirect_uri":   h.redirect,
-		"state":          h.state,
+		"code":          code,
+		"code_verifier": h.verifier,
+		"redirect_uri":  h.redirect,
+		"state":         h.state,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("exchange: status %d body %s", rec.Code, rec.Body.String())
@@ -389,10 +389,10 @@ func TestCLIRevocationLoopbackFlow(t *testing.T) {
 		"Host":         "ope.example.com",
 		"Content-Type": "application/json",
 	}, map[string]any{
-		"code":           code,
-		"code_verifier":  h.verifier,
-		"redirect_uri":   h.redirect,
-		"state":          h.state,
+		"code":          code,
+		"code_verifier": h.verifier,
+		"redirect_uri":  h.redirect,
+		"state":         h.state,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replay exchange: status %d, want 200", rec.Code)
@@ -410,10 +410,10 @@ func TestCLIRevocationLoopbackFlow(t *testing.T) {
 		"Host":         "ope.example.com",
 		"Content-Type": "application/json",
 	}, map[string]any{
-		"code":           code,
-		"code_verifier":  "wrong-verifier",
-		"redirect_uri":   h.redirect,
-		"state":          h.state,
+		"code":          code,
+		"code_verifier": "wrong-verifier",
+		"redirect_uri":  h.redirect,
+		"state":         h.state,
 	})
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("wrong verifier status = %d, want 401", rec.Code)
