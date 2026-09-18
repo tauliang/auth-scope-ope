@@ -1,0 +1,62 @@
+# Demo deployment: one self-contained OPE instance for the walkthrough.
+#
+# This is the fastest way to see the three screens (Connect, Authorize,
+# Mission) without real AuthScope, GitHub, or HSM credentials. The
+# instance runs in development mode against an unreachable AuthScope
+# URL, the same fake-backend posture the e2e suite uses, so every
+# screen is navigable and the bootstrap ceremony works end to end.
+#
+# The web UI is embedded in the image (the Dockerfile builds it with
+# the embedweb tag), so this is a single container: API and UI both
+# answer on port 8080.
+#
+# Start:  docker compose -f demo/compose.yaml up -d --build
+# UI:     http://localhost:8080
+# Logs:   docker compose -f demo/compose.yaml logs -f ope-demo
+# Stop:   docker compose -f demo/compose.yaml down
+#
+# The bootstrap code is printed to the container log at startup; enter
+# it in the browser to begin founder enrollment. The data volume
+# persists the instance binding between restarts; `down -v` wipes it
+# for a fresh bootstrap.
+
+services:
+  ope-demo:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: authscope-ope:demo
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    volumes:
+      - ope-demo-data:/data:rw
+    environment:
+      # Development mode: no HSM signer reference needed; the server
+      # uses an ephemeral in-memory dev-only signer and says so loudly.
+      OPE_MODE: development
+      # Bind all interfaces inside the container; the published port
+      # stays loopback-only on the host (see ports above).
+      OPE_BIND_ADDR: "0.0.0.0:8080"
+      OPE_DATA_DIR: /data
+      OPE_ROOT: /app
+      # Unreachable on purpose: the demo runs against the fake-backend
+      # posture, exactly like scripts/run-e2e.sh does.
+      AUTH_SCOPE_URL: http://127.0.0.1:9
+      OPE_WORKSPACE_ID: ws-demo
+      OPE_HOSTNAME: demo.local
+      OPE_ORIGIN: http://localhost:8080
+      OPE_RP_ID: localhost
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  ope-demo-data:
+    driver: local

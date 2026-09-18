@@ -14,6 +14,40 @@ The whole product is three screens, and every path resolves to one of them:
 - **Authorize.** Review the shaped proposal: the trusted issue snapshot, the exact plan, and the invocation digest that binds the fixed agent kit and runner arguments. Approve with a passkey, which mints an exact signed decision attestation. Approval creates the mission and nothing else.
 - **Mission.** Watch the governed run, resolve expansion requests (each one an exact signed decision), revoke when needed, and receive the locally verified receipt. The automatically published GitHub check carries only the outcome, the historical enforcement status, and a receipt-digest prefix; the full evidence stays in the private founder view.
 
+## Docker
+
+The repository ships a multi-stage `Dockerfile`: it builds the founder
+UI with pnpm, compiles the Go binary with the bundle embedded (the
+`embedweb` tag), and produces a minimal non-root runtime image with a
+read-only root filesystem and an owner-only data volume. The image
+serves both the API and the UI on port 8080.
+
+```sh
+make docker-build   # builds authscope-ope:latest
+```
+
+**Try the demo.** The fastest way to see the three screens, with no
+real AuthScope, GitHub, or HSM credentials. The demo instance runs in
+development mode against the same fake-backend posture the e2e suite
+uses:
+
+```sh
+docker compose -f demo/compose.yaml up -d --build
+# open http://localhost:8080
+# the one-time bootstrap code is in: docker compose -f demo/compose.yaml logs ope-demo
+docker compose -f demo/compose.yaml down      # stop; keeps data
+docker compose -f demo/compose.yaml down -v   # stop and wipe for a fresh bootstrap
+```
+
+**Deploy for real.** `deploy/compose.yaml` runs one workspace-bound
+instance in release mode. It needs three explicit prerequisites: the
+`authscope-ope` CLI on the operator machine, the governed `ope-runner`
+binary mounted read-only from the host, and a managed non-exportable
+workload signer reference (`OPE_WORKLOAD_SIGNER_REF`). The published
+port is loopback-only; reach the UI through an SSH tunnel or a
+TLS-terminating reverse proxy. Full details live in
+[deploy/README.md](deploy/README.md).
+
 ## Planning documents
 
 - [OPE Edition v1 design](docs/superpowers/specs/2026-09-13-ope-edition-v1-design.md)
