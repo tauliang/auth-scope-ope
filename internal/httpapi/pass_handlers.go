@@ -31,7 +31,8 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 		return
 	}
 	approval := newApprovalService(deps, gh.source)
-	strict := func(next http.HandlerFunc) http.HandlerFunc {		return requireExactHost(deps.Config,
+	strict := func(next http.HandlerFunc) http.HandlerFunc {
+		return requireExactHost(deps.Config,
 			requireExactOrigin(deps.Config,
 				requireJSON(next)))
 	}

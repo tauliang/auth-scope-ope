@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql migrations/007_cli_authorizations.sql migrations/008_launch_exchange.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -37,6 +37,7 @@ var migrations = []struct {
 	{"005_mission_pass_request_keys", "migrations/005_mission_pass_request_keys.sql"},
 	{"006_mission_pass_approval", "migrations/006_mission_pass_approval.sql"},
 	{"007_cli_authorizations", "migrations/007_cli_authorizations.sql"},
+	{"008_launch_exchange", "migrations/008_launch_exchange.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -331,6 +332,10 @@ func (t *sqliteTx) DeleteConnection(ctx context.Context, workspaceID, connection
 
 func (t *sqliteTx) PutMissionPass(ctx context.Context, rec MissionPassRecord, expectedStoreRevision int64) error {
 	return putMissionPass(ctx, t.tx, rec, expectedStoreRevision)
+}
+
+func (t *sqliteTx) GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error) {
+	return getMissionPass(ctx, t.tx, workspaceID, passID)
 }
 
 func (t *sqliteTx) PutEventIfAbsent(ctx context.Context, rec MissionEventRecord) (bool, error) {
@@ -941,8 +946,8 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 			&rec.AgentKitID, &rec.AgentKitVersion, &runnerArgs, &rec.InvocationDigest,
 			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
 			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation,
-		&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
-		&rec.AttestationDigest, &rec.RunID, &created, &updated)
+			&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
+			&rec.AttestationDigest, &rec.RunID, &created, &updated)
 	if err == sql.ErrNoRows {
 		return MissionPassRecord{}, fmt.Errorf("%w: mission pass %q", ErrNotFound, passID)
 	}

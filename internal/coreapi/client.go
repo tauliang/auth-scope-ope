@@ -498,7 +498,7 @@ func (c *Client) PrepareLaunch(ctx context.Context, missionRef string, in Launch
 	}
 	var out LaunchArtifacts
 	path := "/v1/missions/" + pathEscape(missionRef) + "/launch/prepare"
-	body := prepareLaunchRequest{IdempotencyKey: in.IdempotencyKey, KitID: in.KitID, Attestation: env}
+	body := prepareLaunchRequest{IdempotencyKey: in.IdempotencyKey, KitID: in.KitID, EphemeralPublicKey: in.EphemeralPublicKey, Attestation: env}
 	if err := c.do(ctx, http.MethodPost, path, nil, body, &out, opts); err != nil {
 		return LaunchArtifacts{}, err
 	}

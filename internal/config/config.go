@@ -29,6 +29,7 @@ var (
 	ErrMissingHostname                = errors.New("config: OPE_HOSTNAME is required")
 	ErrMissingOrigin                  = errors.New("config: OPE_ORIGIN is required")
 	ErrMissingRPID                    = errors.New("config: OPE_RP_ID is required")
+	ErrMissingRunnerPath              = errors.New("config: OPE_RUNNER_PATH is required to launch a governed run")
 )
 
 // Config is the validated operator configuration for one OPE instance.
@@ -63,6 +64,10 @@ type Config struct {
 	// SessionCookieName is the __Host- session cookie name derived from the
 	// instance ID.
 	SessionCookieName string
+	// RunnerPath is the absolute path of the governed agent-runner
+	// executable the CLI starts. Set OPE_RUNNER_PATH; the run command
+	// requires it and validates the binary before every launch.
+	RunnerPath string
 }
 
 // Load reads and validates configuration from the environment.
@@ -104,6 +109,7 @@ func Load() (Config, error) {
 	c.BindAddr = getenv("OPE_BIND_ADDR", "127.0.0.1:8080")
 	c.DataDir = getenv("OPE_DATA_DIR", "./var/ope")
 	c.RootDir = getenv("OPE_ROOT", ".")
+	c.RunnerPath = strings.TrimSpace(os.Getenv("OPE_RUNNER_PATH"))
 
 	if err := loadInstanceBinding(&c); err != nil {
 		return Config{}, err

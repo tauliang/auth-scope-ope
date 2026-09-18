@@ -1,0 +1,24 @@
+{
+  "format": "authscope-signing-keys/v1",
+  "keys": [
+    {
+      "algorithm": "Ed25519",
+      "key_id": "authscope-signing-root-test",
+      "public_key": "_4FY8InKalxXUNB72YudJ8bbkq3cs9PFp4sj2ndvUHQ",
+      "root": true,
+      "valid_from": "2026-09-18T06:50:59Z"
+    },
+    {
+      "algorithm": "Ed25519",
+      "key_id": "authscope-signing-2026-09-test",
+      "public_key": "LJgFZBteMXFHjRAEzHVUEU0ndUoe6fJDmUXZO0nOPUw",
+      "root": false,
+      "rotated_from": "authscope-signing-root-test",
+      "rotation_signature": "rZ0nf2ehprhrC4uswX8iebDdLkj_T--FZutziewFNREtzAL8qX1y17BaLTCZzKhKcAvjFlC9rLfQCfLHASVQAw",
+      "rotation_statement": "eyJkb21haW4iOiJhdXRoc2NvcGUtc2lnbmluZy1rZXlzL3JvdGF0aW9uL3YxIiwicHJldmlvdXNfa2V5X2lkIjoiYXV0aHNjb3BlLXNpZ25pbmctcm9vdC10ZXN0IiwibmV3X2tleV9pZCI6ImF1dGhzY29wZS1zaWduaW5nLTIwMjYtMDktdGVzdCIsIm5ld19wdWJsaWNfa2V5IjoiTEpnRlpCdGVNWEZIalJBRXpIVlVFVTBuZFVvZTZmSkRtVVhaTzBuT1BVdyIsImlzc3VlZF9hdCI6IjIwMjYtMDktMThUMDY6NTA6NTlaIn0",
+      "valid_from": "2026-09-18T06:50:59Z"
+    }
+  ],
+  "note": "TEST PIN ONLY. This pin file carries a locally generated test signing root so the sealed-envelope path can be exercised in CI. It is not the production AuthScope signing root. The production root pin MUST replace this file before any release that talks to a real AuthScope.",
+  "signing_root_fingerprint": "sha256:bf231dadc1c63c8a47bef909e7761be8c24a9241136f0fa903af2af992e3d62a"
+}

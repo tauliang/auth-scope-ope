@@ -19,6 +19,10 @@ func (s *sqliteStore) GetCLIAuthorizationByState(ctx context.Context, workspaceI
 	return getCLIAuthorizationByState(ctx, s.db, workspaceID, passID, state)
 }
 
+func (s *sqliteStore) GetCLIAuthorizationByCodeHash(ctx context.Context, workspaceID string, codeHash [32]byte) (CLIAuthorization, error) {
+	return getCLIAuthorizationByCodeHash(ctx, s.db, workspaceID, codeHash)
+}
+
 func (t *sqliteTx) PutCLIAuthorization(ctx context.Context, rec CLIAuthorization) error {
 	return putCLIAuthorization(ctx, t.tx, rec)
 }
@@ -91,6 +95,20 @@ func getCLIAuthorization(ctx context.Context, c dbConn, workspaceID, authorizati
 			return CLIAuthorization{}, fmt.Errorf("%w: CLI authorization %q", ErrNotFound, authorizationID)
 		}
 		return CLIAuthorization{}, fmt.Errorf("store: get CLI authorization: %w", err)
+	}
+	return rec, nil
+}
+
+func getCLIAuthorizationByCodeHash(ctx context.Context, c dbConn, workspaceID string, codeHash [32]byte) (CLIAuthorization, error) {
+	rec, err := scanCLIAuthorization(c.QueryRowContext(ctx,
+		`SELECT `+cliAuthorizationColumns+`
+		FROM cli_authorizations WHERE workspace_id = ? AND code_hash = ?`,
+		workspaceID, codeHash[:]))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return CLIAuthorization{}, fmt.Errorf("%w: CLI authorization for code", ErrNotFound)
+		}
+		return CLIAuthorization{}, fmt.Errorf("store: get CLI authorization by code hash: %w", err)
 	}
 	return rec, nil
 }

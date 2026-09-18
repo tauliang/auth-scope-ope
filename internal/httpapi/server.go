@@ -41,6 +41,10 @@ type Dependencies struct {
 	// authorization. Nil in tests that do not exercise the CLI routes; the
 	// CLI routes are registered only when it is present.
 	CLIAuth *authn.CLIAuthorizationService
+	// Launch exchanges one authorization code plus verifier for the
+	// prepared governed run. Nil in tests that do not exercise the token
+	// route; the token route is registered only when it is present.
+	Launch launchExchanger
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2

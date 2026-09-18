@@ -4,5 +4,7 @@
   "locked_at": "2026-09-18",
   "note": "Immutable AuthScope release satisfying the complete OPE capability manifest (36 operations). GitHub release 391187606.",
   "openapi_sha256": "9516e098c5ee9196b6bc73f3633123d173d4249fbc0a5063843924d53b43af76",
-  "openapi_source": "tauliang/auth-scope@ope-v1.0.0 openapi/auth-scope-v1.yaml"
+  "openapi_source": "tauliang/auth-scope@ope-v1.0.0 openapi/auth-scope-v1.yaml",
+  "signing_keys_sha256": "82ad34a6edd7223336b1ed15982a37bd1cb39c2f6f4776f1cb8e65007b08cb09",
+  "signing_keys_note": "TEST PIN ONLY: locally generated test signing root; the production AuthScope root pin must replace contracts/authscope-signing-keys.json before release."
 }

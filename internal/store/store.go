@@ -112,6 +112,11 @@ type Store interface {
 	// idempotent replay: the same canonical request replays, changed
 	// content conflicts.
 	GetCLIAuthorizationByState(ctx context.Context, workspaceID, passID, state string) (CLIAuthorization, error)
+	// GetCLIAuthorizationByCodeHash returns the approved authorization
+	// holding the given code hash, or ErrNotFound. The launch exchange
+	// uses it to resolve an authorization code without ever storing the
+	// code itself.
+	GetCLIAuthorizationByCodeHash(ctx context.Context, workspaceID string, codeHash [32]byte) (CLIAuthorization, error)
 }
 
 // Tx is the write side of the presentation store. Every method is
@@ -163,6 +168,9 @@ type Tx interface {
 	// when the event was inserted and false when an event with the same
 	// workspace-qualified event ID already exists.
 	PutEventIfAbsent(context.Context, MissionEventRecord) (bool, error)
+	// GetMissionPass returns one workspace-qualified mission pass inside
+	// the transaction, or ErrNotFound.
+	GetMissionPass(ctx context.Context, workspaceID, passID string) (MissionPassRecord, error)
 	// BeginIdempotency starts or replays an idempotent operation. A new key
 	// returns Replay=false; a known key with the same canonical digest
 	// returns Replay=true with the stored result when completed; a known key
@@ -219,6 +227,36 @@ type Tx interface {
 	// already-approved authorization returns ErrConflict, which rejects
 	// duplicate and concurrent finishes.
 	ApproveCLIAuthorization(ctx context.Context, workspaceID, authorizationID, decisionChallengeID, attestationDigest string, codeHash [32]byte, approvedAt time.Time) error
+	// ClaimLaunchExchangeIntent atomically inserts one exchange intent row
+	// keyed by the code hash. It reports false (without error) when the
+	// code hash is already claimed. Only digests and run metadata are
+	// stored: the sealed envelope and the attestation never reach the
+	// store.
+	ClaimLaunchExchangeIntent(ctx context.Context, intent LaunchExchangeIntent, now time.Time) (bool, error)
+	// GetLaunchExchangeIntent returns one workspace-qualified exchange
+	// intent by code hash, or ErrNotFound.
+	GetLaunchExchangeIntent(ctx context.Context, workspaceID, codeHash string) (LaunchExchangeIntent, error)
+	// SettleLaunchExchangeIntent moves an in-flight intent to completed or
+	// failed exactly once, recording the run id and envelope digest on
+	// success. A second settle returns ErrConflict.
+	SettleLaunchExchangeIntent(ctx context.Context, workspaceID, codeHash, status, runID, envelopeDigest, failure string, now time.Time) error
+}
+
+// LaunchExchangeIntent is the durable reservation for one authorization
+// code exchange. Status is one of "in_flight", "completed", or "failed".
+// The row carries only digests and run metadata.
+type LaunchExchangeIntent struct {
+	WorkspaceID       string
+	CodeHash          string // hex SHA-256 of the decoded authorization code
+	AuthorizationID   string
+	PassID            string
+	RunID             string
+	Status            string
+	AttestationDigest string
+	EnvelopeDigest    string // "sha256:..." of the sealed signed envelope
+	Failure           string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // InstanceRecord is the immutable binding of one OPE instance. It is

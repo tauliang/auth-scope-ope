@@ -65,6 +65,45 @@ if kind != "release":
         "Task 2 has no authorized start condition"
     )
 
+# The signing-key pin file is trusted implicitly, so the lock pins its exact
+# bytes and this gate re-verifies structure: format tag, root fingerprint,
+# and a root entry whose fingerprint matches.
+pin_path = f"{root}/contracts/authscope-signing-keys.json"
+try:
+    pin_raw = open(pin_path, "rb").read()
+except OSError as e:
+    errors.append(f"signing-key pin file missing: {e}")
+else:
+    pin_digest = hashlib.sha256(pin_raw).hexdigest()
+    if pin_digest != lock.get("signing_keys_sha256", ""):
+        errors.append(
+            f"signing-key pin digest mismatch: got {pin_digest}, "
+            f"lock wants {lock.get('signing_keys_sha256', '')!r}"
+        )
+    try:
+        pin = json.loads(pin_raw.decode("utf-8"))
+    except ValueError as e:
+        errors.append(f"signing-key pin file is not JSON: {e}")
+        pin = None
+    if pin is not None:
+        if pin.get("format") != "authscope-signing-keys/v1":
+            errors.append(f"signing-key pin format {pin.get('format')!r} is not authscope-signing-keys/v1")
+        fp = pin.get("signing_root_fingerprint", "")
+        if not (isinstance(fp, str) and fp.startswith("sha256:") and len(fp) == len("sha256:") + 64):
+            errors.append("signing-key pin has no well-formed signing_root_fingerprint")
+        roots = [k for k in (pin.get("keys") or []) if isinstance(k, dict) and k.get("root")]
+        if len(roots) != 1:
+            errors.append(f"signing-key pin has {len(roots)} root entries, want exactly 1")
+        elif fp:
+            import base64 as _b64
+            try:
+                raw_pub = _b64.urlsafe_b64decode(roots[0].get("public_key", "") + "==")
+                calc = "sha256:" + hashlib.sha256(raw_pub).hexdigest()
+            except Exception:
+                calc = ""
+            if calc != fp:
+                errors.append("signing-key pin root entry does not match signing_root_fingerprint")
+
 print("contract-ready: " + ("RED" if errors else "GREEN"))
 for e in errors:
     print(f"ERROR: {e}")

@@ -62,20 +62,20 @@ func (s stubDecisionVerifier) FinishAssertion(_ context.Context, _ authn.Ceremon
 type fakeApprovalAuthority struct {
 	*fakeMissionAuthority
 
-	mission             coreapi.Mission
-	approveErr          error
-	failApproveOnce     error
-	approveCalls        int
-	approveKeys         []string
-	prepareCalls        int
-	missionsCreated     int
-	approvedByKey       map[string]coreapi.Mission
-	signedAttestations  []identity.SignedDecisionAttestation
-	identityRoles       map[string][]string
-	identityKeys        map[string]ed25519.PublicKey
-	seenNonces          map[string]bool
-	expectedBinding     ApprovalBinding
-	tamper              func(*identity.SignedDecisionAttestation)
+	mission            coreapi.Mission
+	approveErr         error
+	failApproveOnce    error
+	approveCalls       int
+	approveKeys        []string
+	prepareCalls       int
+	missionsCreated    int
+	approvedByKey      map[string]coreapi.Mission
+	signedAttestations []identity.SignedDecisionAttestation
+	identityRoles      map[string][]string
+	identityKeys       map[string]ed25519.PublicKey
+	seenNonces         map[string]bool
+	expectedBinding    ApprovalBinding
+	tamper             func(*identity.SignedDecisionAttestation)
 }
 
 func (f *fakeApprovalAuthority) ApproveProposal(_ context.Context, proposalID string, in coreapi.ApproveProposalInput, att identity.SignedDecisionAttestation, opts coreapi.RequestOptions) (coreapi.Mission, error) {
@@ -261,12 +261,12 @@ func newApprovalFixture(t *testing.T) *approvalFixture {
 			return err
 		}
 		return tx.PutWebAuthnCredential(ctx, store.WebAuthnCredentialRecord{
-			WorkspaceID: "ws-test",
+			WorkspaceID:  "ws-test",
 			CredentialID: base64.RawURLEncoding.EncodeToString([]byte("cred-1")),
-			FounderID:   founderID,
-			PublicKey:   []byte("pk-1"),
-			SignCount:   0,
-			CreatedAt:   fixtureClock,
+			FounderID:    founderID,
+			PublicKey:    []byte("pk-1"),
+			SignCount:    0,
+			CreatedAt:    fixtureClock,
 		})
 	}); err != nil {
 		t.Fatalf("seed founder: %v", err)
@@ -605,8 +605,8 @@ func TestApprovalFinishStaleProposalFails(t *testing.T) {
 	// Narrow the limits after begin: the exact proposal moved.
 	if _, err := fx.proposal.ReviseProposal(ctx, "ws-test", "founder-1", ReviseProposalInput{
 		PassID: fx.draft.PassID, ExpectedStoreRevision: fx.draft.StoreRevision,
-		ExpectedDraftVersion: fx.draft.DraftVersion,
-		ExpiresAt:            fixtureClock.Add(30 * time.Minute),
+		ExpectedDraftVersion:   fx.draft.DraftVersion,
+		ExpiresAt:              fixtureClock.Add(30 * time.Minute),
 		MaxAggregateCostMicros: 5_000_000,
 	}); err != nil {
 		t.Fatalf("ReviseProposal: %v", err)

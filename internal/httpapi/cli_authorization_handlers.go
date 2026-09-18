@@ -22,9 +22,18 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 )
 
-// cliRoutes registers the CLI handoff routes. They exist only when the CLI
-// authorization service is wired.
+// cliRoutes registers the CLI handoff routes. The browser handoff routes
+// exist only when the CLI authorization service is wired; the token
+// exchange route exists only when the launch service is wired.
 func cliRoutes(mux *http.ServeMux, deps Dependencies) {
+	if deps.Launch != nil {
+		tokenLimiter := newRateLimiter(cliTokenRateLimit, cliTokenRateWindow)
+		launchSvc := deps.Launch
+		mux.HandleFunc("POST /api/v1/cli/token",
+			tokenLimiter.limit(requireJSON(func(w http.ResponseWriter, r *http.Request) {
+				handleCLIToken(launchSvc, w, r)
+			})))
+	}
 	svc := deps.CLIAuth
 	if svc == nil {
 		return

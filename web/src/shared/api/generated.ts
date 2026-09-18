@@ -90,6 +90,17 @@ export interface CLIAuthorizationCreateResponse {
   runner_arguments: string[];
 }
 
+export interface CLITokenRequest {
+  code: string;
+  verifier: string;
+}
+
+export interface CLITokenResponse {
+  mission_ref: string;
+  run_id: string;
+  sealed_envelope: string;
+}
+
 export interface CeremonyBeginResponse {
   ceremony_id: string;
   options: unknown;

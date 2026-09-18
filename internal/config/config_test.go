@@ -254,3 +254,31 @@ func TestLoadDefaultInstanceIDVariesByHostname(t *testing.T) {
 		t.Fatal("default instance ID must differ per hostname")
 	}
 }
+
+func TestLoadReadsRunnerPath(t *testing.T) {
+	setInstanceEnv(t)
+	t.Setenv("OPE_MODE", "development")
+	t.Setenv("AUTH_SCOPE_URL", "https://authority.example")
+	t.Setenv("OPE_RUNNER_PATH", "/opt/runners/authscope-agent-run")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+	if cfg.RunnerPath != "/opt/runners/authscope-agent-run" {
+		t.Fatalf("RunnerPath = %q", cfg.RunnerPath)
+	}
+}
+
+func TestLoadRunnerPathDefaultsEmpty(t *testing.T) {
+	setInstanceEnv(t)
+	t.Setenv("OPE_MODE", "development")
+	t.Setenv("AUTH_SCOPE_URL", "https://authority.example")
+	t.Setenv("OPE_RUNNER_PATH", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+	if cfg.RunnerPath != "" {
+		t.Fatalf("RunnerPath = %q, want empty", cfg.RunnerPath)
+	}
+}

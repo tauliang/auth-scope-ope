@@ -345,7 +345,7 @@ func TestApproveTimeoutReconcilesThroughGet(t *testing.T) {
 		t.Fatalf("get after settle: status %d body %s", rec.Code, rec.Body.String())
 	}
 	var settled struct {
-		State     string `json:"state"`
+		State      string `json:"state"`
 		MissionRef string `json:"mission_ref"`
 	}
 	decodeBody(t, rec, &settled)

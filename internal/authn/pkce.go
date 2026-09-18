@@ -63,6 +63,9 @@ var (
 	// ErrCLIBindingChanged reports an approved launch binding that moved
 	// between browser begin and finish. The authorization is not consumed.
 	ErrCLIBindingChanged = errors.New("authn: approved launch binding changed")
+	// ErrCLIRecordTampered reports a stored CLI authorization record whose
+	// pinned canonical request digest no longer matches its fields.
+	ErrCLIRecordTampered = errors.New("authn: CLI authorization record failed integrity check")
 )
 
 // approvedPassState is the mission pass state a CLI authorization requires.
@@ -386,6 +389,33 @@ func canonicalRequestDigest(req CLIAuthorizationRequest, b *launchBinding) [32]b
 		MissionVersion:   b.MissionVersion,
 	})
 	return sha256.Sum256(raw)
+}
+
+// VerifyRecordIntegrity recomputes the canonical request digest from the
+// stored authorization record and compares it with the value pinned at
+// create time. Any tampering with the stored record after create fails
+// closed here, before an authorization code is ever exchanged.
+func VerifyRecordIntegrity(rec store.CLIAuthorization) error {
+	want := canonicalRequestDigest(CLIAuthorizationRequest{
+		PassID:             rec.PassID,
+		RedirectURI:        rec.RedirectURI,
+		State:              rec.State,
+		CodeChallenge:      rec.CodeChallenge,
+		EphemeralPublicKey: rec.EphemeralPublicKey,
+	}, &launchBinding{
+		PassID:           rec.PassID,
+		MissionRef:       rec.MissionRef,
+		MissionVersion:   rec.MissionVersion,
+		ProposalDigest:   rec.ProposalDigest,
+		InvocationDigest: rec.InvocationDigest,
+		AgentKitID:       rec.AgentKitID,
+		AgentKitVersion:  rec.AgentKitVersion,
+		RunnerArguments:  rec.RunnerArguments,
+	})
+	if subtle.ConstantTimeCompare(want[:], rec.CanonicalRequestDigest[:]) != 1 {
+		return ErrCLIRecordTampered
+	}
+	return nil
 }
 
 // validateCreateRequest enforces the strict PKCE, redirect, and ephemeral

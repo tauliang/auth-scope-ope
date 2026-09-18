@@ -316,24 +316,33 @@ type Proposal struct {
 	CreatedAt        int64    `json:"created_at"`
 }
 
-// LaunchRequest prepares a governed launch of an approved mission.
+// LaunchRequest prepares a governed run of an approved mission. The
+// ephemeral public key is the CLI X25519 key the sealed signed envelope
+// is sealed to.
 type LaunchRequest struct {
-	KitID          string `json:"kit_id"`
-	IdempotencyKey string `json:"idempotency_key"`
+	KitID              string `json:"kit_id"`
+	IdempotencyKey     string `json:"idempotency_key"`
+	EphemeralPublicKey string `json:"ephemeral_public_key"`
 }
 
-// LaunchArtifacts are the signed runtime artifacts for a prepared launch.
+// LaunchArtifacts are the signed runtime artifacts for a prepared run.
+// The sealed signed envelope is opaque to OPE: only its digest is ever
+// persisted.
 type LaunchArtifacts struct {
-	PreparationID           string `json:"preparation_id"`
-	WorkspaceID             string `json:"workspace_id"`
-	MissionRef              string `json:"mission_ref"`
-	IdempotencyKey          string `json:"idempotency_key"`
-	WorktreePath            string `json:"worktree_path"`
-	CleanHome               bool   `json:"clean_home"`
-	CredentialDescriptorRef string `json:"credential_descriptor_ref"`
-	AttestationDigest       string `json:"attestation_digest"`
-	Status                  string `json:"status"`
-	CreatedAt               int64  `json:"created_at"`
+	RunID                   string   `json:"run_id"`
+	MissionRef              string   `json:"mission_ref"`
+	AuthScopeMissionVersion int64    `json:"authscope_mission_version"`
+	RuntimePolicyID         string   `json:"runtime_policy_id"`
+	LeaseID                 string   `json:"lease_id"`
+	AgentKitID              string   `json:"agent_kit_id"`
+	AgentKitVersion         string   `json:"agent_kit_version"`
+	InvocationDigest        string   `json:"invocation_digest"`
+	RunnerExecutable        string   `json:"runner_executable"`
+	RunnerArguments         []string `json:"runner_arguments"`
+	IsolationProfile        string   `json:"isolation_profile"`
+	EnvelopeKeyID           string   `json:"envelope_key_id"`
+	SealedSignedEnvelope    []byte   `json:"sealed_signed_envelope"`
+	ExpiresAt               int64    `json:"expires_at"`
 }
 
 // Mission is the upstream mission record.
@@ -480,11 +489,13 @@ type GitHubCheckResult struct {
 }
 
 // OperationResult is the reconciled state of an idempotent operation.
+// Artifacts carries the prepared launch when the operation completed.
 type OperationResult struct {
-	OperationID    string `json:"operation_id"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Status         string `json:"status"`
-	WorkspaceID    string `json:"workspace_id"`
+	OperationID    string           `json:"operation_id"`
+	IdempotencyKey string           `json:"idempotency_key"`
+	Status         string           `json:"status"`
+	WorkspaceID    string           `json:"workspace_id"`
+	Artifacts      *LaunchArtifacts `json:"artifacts,omitempty"`
 }
 
 // ActiveMission is one workspace-scoped active mission.
@@ -531,9 +542,10 @@ type approveProposalRequest struct {
 
 // prepareLaunchRequest is the wire body for launch preparation.
 type prepareLaunchRequest struct {
-	IdempotencyKey string         `json:"idempotency_key"`
-	KitID          string         `json:"kit_id"`
-	Attestation    map[string]any `json:"attestation"`
+	IdempotencyKey     string         `json:"idempotency_key"`
+	KitID              string         `json:"kit_id"`
+	EphemeralPublicKey string         `json:"ephemeral_public_key"`
+	Attestation        map[string]any `json:"attestation"`
 }
 
 // revokeMissionRequest is the wire body for mission revocation.

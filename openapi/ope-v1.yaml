@@ -874,6 +874,68 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/cli/token:
+    post:
+      operationId: cliTokenExchange
+      summary: Exchange one authorization code for the sealed launch envelope
+      description: >
+        Called by the local CLI after the browser handoff. Exchanges the
+        one-use authorization code plus the PKCE verifier for the sealed
+        signed envelope of the prepared governed run. Exactly one upstream
+        launch preparation happens per code: a concurrent double submit or
+        a retry after a lost response returns only the original sealed
+        result. The sealed envelope is opaque base64url; only the CLI's
+        ephemeral private key opens it. Requires no browser session;
+        per-IP rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CLITokenRequest'
+      responses:
+        '200':
+          description: Exchange succeeded; the run is prepared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CLITokenResponse'
+        '400':
+          description: Bad request (malformed code or verifier).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Authorization code not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The exchange conflicts with the approved launch binding.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '410':
+          description: The launch authorization is no longer valid; authorize again in the browser.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Per-IP rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: The exchange outcome is ambiguous; retry the exchange.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 components:
   schemas:
     HealthResponse:
@@ -1323,6 +1385,31 @@ components:
         invocation_digest:
           type: string
           description: The pinned launch invocation digest, for the CLI to recompute and compare.
+    CLITokenRequest:
+      type: object
+      required: [code, verifier]
+      properties:
+        code:
+          type: string
+          description: The one-use authorization code, base64url with no padding.
+        verifier:
+          type: string
+          description: The S256 PKCE verifier, base64url with no padding.
+    CLITokenResponse:
+      type: object
+      required: [run_id, mission_ref, sealed_envelope]
+      properties:
+        run_id:
+          type: string
+          description: The prepared governed run ID.
+        mission_ref:
+          type: string
+          description: The mission reference the run was prepared for.
+        sealed_envelope:
+          type: string
+          description: >
+            The sealed signed envelope, base64url with no padding. Opaque
+            to the server; only the CLI's ephemeral private key opens it.
     CLIAuthorizationApproveBeginResponse:
       type: object
       required: [challenge_id, assertion_options, pass_id, repository_name, issue_number, proposal_digest, invocation_digest, agent_kit_id, agent_kit_version, runner_arguments]

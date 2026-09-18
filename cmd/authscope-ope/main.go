@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,7 +22,9 @@ import (
 	"github.com/tauliang/authscope-ope/internal/coreapi"
 	"github.com/tauliang/authscope-ope/internal/httpapi"
 	"github.com/tauliang/authscope-ope/internal/identity"
+	"github.com/tauliang/authscope-ope/internal/launch"
 	"github.com/tauliang/authscope-ope/internal/store"
+	"github.com/tauliang/authscope-ope/internal/trust"
 )
 
 func main() {
@@ -114,6 +117,26 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("CLI authorization service: %w", err)
 	}
+	// Task 9: the launch service exchanges one authorization code plus
+	// verifier for exactly one upstream launch preparation. It shares the
+	// CLI handoff's in-memory decision attestations and the gated
+	// upstream authority. The service cannot open sealed envelopes (only
+	// the CLI ephemeral key opens them), but it refuses to adopt
+	// artifacts sealed under a signing key the trust pin does not know.
+	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"))
+	if err != nil {
+		return fmt.Errorf("signing keys: %w", err)
+	}
+	launchSvc, err := launch.NewService(launch.Config{
+		Store:        st,
+		WorkspaceID:  cfg.WorkspaceID,
+		Authority:    gated,
+		Attestations: cliAuth.Attestations(),
+		Keys:         keys,
+	})
+	if err != nil {
+		return fmt.Errorf("launch service: %w", err)
+	}
 	// The bootstrap code is issued and printed only for an unenrolled
 	// instance. EnsureBootstrapCode returns an empty code once a founder
 	// is enrolled, so the secret never appears on the terminal again.
@@ -127,17 +150,19 @@ func runServe() error {
 		Gate: gate, Authority: gated,
 		Attestor: attestor,
 		CLIAuth:  cliAuth,
+		Launch:   launchSvc,
 	})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)
 }
 
 // runLaunch authorizes one launch of an approved pass through the
-// one-use browser PKCE handoff. It prints the browser URL, waits for the
-// loopback callback, and retains the authorization bundle in memory for
-// the Task 9 exchange until interrupted. Secrets are zeroed on completion,
-// cancellation, timeout, or signal, and are never printed or written to
-// disk.
+// one-use browser PKCE handoff, exchanges the code for the sealed signed
+// envelope, opens and verifies the envelope, and starts the governed
+// runner with the signed envelope on FD 3. Secrets are zeroed on
+// completion, cancellation, timeout, or signal, and are never printed or
+// written to disk. No user-supplied command or arguments are accepted:
+// everything the runner receives comes from the verified envelope.
 func runLaunch(args []string) error {
 	if len(args) != 1 || args[0] == "" {
 		return fmt.Errorf("usage: authscope-ope run <pass-id>")
@@ -146,17 +171,48 @@ func runLaunch(args []string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.RunnerPath == "" {
+		return config.ErrMissingRunnerPath
+	}
+	runnerPath, err := cli.ValidateRunnerPath(cfg.RunnerPath)
+	if err != nil {
+		return err
+	}
+	keys, err := trust.LoadSigningKeys(filepath.Join(cfg.RootDir, "contracts", "authscope-signing-keys.json"))
+	if err != nil {
+		return fmt.Errorf("signing keys: %w", err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	bundle, err := cli.AuthorizeLaunch(ctx, "http://"+cfg.BindAddr, args[0], cli.Options{})
+	apiBase := "http://" + cfg.BindAddr
+	bundle, err := cli.AuthorizeLaunch(ctx, apiBase, args[0], cli.Options{})
 	if err != nil {
 		return err
 	}
 	defer bundle.Destroy()
-	fmt.Printf("Authorized one launch of pass %s (authorization %s).\nProposal digest: %s\nHolding the authorization in memory for the launch exchange. Press Ctrl-C to discard it.\n",
-		bundle.PassID, bundle.AuthorizationID, bundle.ProposalDigest)
-	<-ctx.Done()
-	fmt.Println("Discarded the launch authorization.")
+	fmt.Printf("Authorized one launch of pass %s (authorization %s).\n", bundle.PassID, bundle.AuthorizationID)
+
+	exchange, err := cli.ExchangeLaunch(ctx, apiBase, bundle, nil)
+	if err != nil {
+		return err
+	}
+	// The envelope must name exactly the validated binary about to
+	// start; anything else fails closed here.
+	payload, signed, err := bundle.OpenSealedEnvelope(exchange.SealedEnvelope, keys, runnerPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Starting governed run %s (mission %s, kit %s %s).\n",
+		payload.RunID, payload.MissionRef, payload.AgentKitID, payload.AgentKitVersion)
+	cmd, cleanup, err := cli.StartGovernedRun(ctx, runnerPath, signed, cli.RunOptions{})
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("runner: %w", err)
+	}
+	fmt.Printf("Governed run %s finished.\n", payload.RunID)
 	return nil
 }
 
