@@ -1,4 +1,7 @@
 import type {
+  ApprovalBeginResponse,
+  ApprovalFinishRequest,
+  ApprovalResult,
   BootstrapBeginRequest,
   BootstrapBeginResponse,
   BootstrapCompleteRequest,
@@ -242,4 +245,44 @@ export function reviseMissionPassDraft(
 // fetchMissionPass reads one mission pass for founder review.
 export function fetchMissionPass(passId: string): Promise<MissionPassReview> {
   return request<MissionPassReview>(`/api/v1/mission-passes/${encodeURIComponent(passId)}`);
+}
+
+// beginMissionPassApproval starts the one-use passkey decision ceremony.
+// The server binds the challenge to the exact proposal revision; the
+// browser supplies no binding or authority fields. The returned options
+// are opaque to the client and feed the WebAuthn call.
+export function beginMissionPassApproval(
+  passId: string,
+  idempotencyKey?: string,
+): Promise<ApprovalBeginResponse> {
+  return postJson<ApprovalBeginResponse>(
+    `/api/v1/mission-passes/${encodeURIComponent(passId)}/approve/begin`,
+    {},
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// finishMissionPassApproval completes the ceremony with the credential
+// assertion. On success the exact proposal is approved and only the
+// mission is created. A 202 payload means the upstream outcome stayed
+// ambiguous; the returned review carries reconciliation "pending" and
+// the pass can be re-read to reconcile the recorded operation.
+export function finishMissionPassApproval(
+  passId: string,
+  challengeId: string,
+  assertion: unknown,
+  idempotencyKey?: string,
+): Promise<ApprovalResult | MissionPassReview> {
+  const body: ApprovalFinishRequest = { challenge_id: challengeId, assertion };
+  return postJson<ApprovalResult | MissionPassReview>(
+    `/api/v1/mission-passes/${encodeURIComponent(passId)}/approve/finish`,
+    body,
+    { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
+  );
+}
+
+// isApprovalResult narrows the ambiguous finish union: a 200 carries the
+// mission result, a 202 carries the pending review.
+export function isApprovalResult(value: ApprovalResult | MissionPassReview): value is ApprovalResult {
+  return typeof (value as ApprovalResult).mission_ref === 'string';
 }

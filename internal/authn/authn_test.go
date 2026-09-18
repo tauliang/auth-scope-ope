@@ -753,7 +753,7 @@ func TestDecisionFlow(t *testing.T) {
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{
 		credentialID: []byte("cred-first"), newSignCount: 4, userVerified: true,
 	})
-	if err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); err != nil {
+	if _, err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); err != nil {
 		t.Fatalf("finish decision: %v", err)
 	}
 	// The decision assertion advances the sign count too.
@@ -770,7 +770,7 @@ func TestDecisionFlow(t *testing.T) {
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{
 		credentialID: []byte("cred-first"), newSignCount: 5, userVerified: true,
 	})
-	if err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyNotFound) {
+	if _, err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyNotFound) {
 		t.Fatalf("expected ErrCeremonyNotFound on replay, got %v", err)
 	}
 }
@@ -807,7 +807,7 @@ func TestDecisionBindingMismatch(t *testing.T) {
 			finishPurpose := DecisionPassApproval
 			finishSubject := "pass-1"
 			tc.mutate(&finishP, &finishClaims, &finishPurpose, &finishSubject)
-			err = svc.FinishDecision(ctx, finishP, challenge.ChallengeID, finishPurpose, finishSubject, finishClaims, []byte("{}"))
+			_, err = svc.FinishDecision(ctx, finishP, challenge.ChallengeID, finishPurpose, finishSubject, finishClaims, []byte("{}"))
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("expected %v, got %v", tc.wantErr, err)
 			}
@@ -832,7 +832,7 @@ func TestDecisionStaleAuth(t *testing.T) {
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{
 		credentialID: []byte("cred-first"), newSignCount: 4, userVerified: true,
 	})
-	if err := svc.FinishDecision(ctx, stale, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrStaleAssertion) {
+	if _, err := svc.FinishDecision(ctx, stale, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrStaleAssertion) {
 		t.Fatalf("expected ErrStaleAssertion, got %v", err)
 	}
 }
@@ -851,7 +851,7 @@ func TestDecisionChallengeExpiry(t *testing.T) {
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{
 		credentialID: []byte("cred-first"), newSignCount: 4, userVerified: true,
 	})
-	if err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyExpired) {
+	if _, err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyExpired) {
 		t.Fatalf("expected ErrCeremonyExpired, got %v", err)
 	}
 }
@@ -867,14 +867,14 @@ func TestDecisionFailedVerificationConsumesChallenge(t *testing.T) {
 		t.Fatalf("begin decision: %v", err)
 	}
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{err: errors.New("bad signature")})
-	if err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrVerificationFailed) {
+	if _, err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrVerificationFailed) {
 		t.Fatalf("expected ErrVerificationFailed, got %v", err)
 	}
 	// A failed attempt cannot be retried with the same challenge.
 	fv.assertOutcomes = append(fv.assertOutcomes, fakeAssertOutcome{
 		credentialID: []byte("cred-first"), newSignCount: 4, userVerified: true,
 	})
-	if err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyNotFound) {
+	if _, err := svc.FinishDecision(ctx, p, challenge.ChallengeID, DecisionPassApproval, "pass-1", claims, []byte("{}")); !errors.Is(err, ErrCeremonyNotFound) {
 		t.Fatalf("expected ErrCeremonyNotFound after failed attempt, got %v", err)
 	}
 }

@@ -30,8 +30,8 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 	if err != nil {
 		return
 	}
-	strict := func(next http.HandlerFunc) http.HandlerFunc {
-		return requireExactHost(deps.Config,
+	approval := newApprovalService(deps, gh.source)
+	strict := func(next http.HandlerFunc) http.HandlerFunc {		return requireExactHost(deps.Config,
 			requireExactOrigin(deps.Config,
 				requireJSON(next)))
 	}
@@ -64,8 +64,14 @@ func passRoutes(mux *http.ServeMux, deps Dependencies, gh *githubServices) {
 				authnProblem(w, err)
 				return
 			}
+			// Reading a pass reconciles an ambiguous approval through
+			// the recorded operation; it never starts a new approval.
+			if approval != nil {
+				approval.ReconcileApproval(r.Context(), principal.WorkspaceID, r.PathValue("id"))
+			}
 			handlePassGet(svc, w, r, principal)
 		}))
+	approvalRoutes(mux, svc, approval, authedStateChange)
 }
 
 // PassDraftCreateRequest opens a mission-pass draft for one issue. Only

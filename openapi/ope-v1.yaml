@@ -578,6 +578,119 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/approve/begin:
+    post:
+      operationId: missionPassApproveBegin
+      summary: Begin the passkey approval ceremony for a mission pass
+      description: >
+        Starts a one-use WebAuthn decision ceremony bound to the exact
+        proposal revision and the founder session. The browser supplies no
+        binding or authority fields; every bound value comes from the
+        server-side challenge record. Requires a founder session, CSRF
+        token, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalBeginResponse'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The pass is not a draft, or an approval is reconciling.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+  /api/v1/mission-passes/{id}/approve/finish:
+    post:
+      operationId: missionPassApproveFinish
+      summary: Finish the passkey approval and create only the mission
+      description: >
+        Verifies the passkey assertion against the bound challenge, signs a
+        two-minute decision attestation with the workload key, and approves
+        the exact proposal upstream. Approval creates only the mission: no
+        runtime policy, no lease, no launch descriptor, no sealed
+        credential, and no run. A 202 means the upstream outcome stayed
+        ambiguous; the pass carries reconciliation "pending" and the read
+        endpoint reconciles the recorded operation. Requires a founder
+        session, CSRF token, and an Idempotency-Key header.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalFinishRequest'
+      responses:
+        '200':
+          description: The exact proposal was approved and the mission was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResult'
+        '202':
+          description: Upstream outcome ambiguous; reconciliation pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionPassReview'
+        '400':
+          description: Bad request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '404':
+          description: Pass or approval challenge not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: The proposal changed since the approval began, or the pass left draft.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
   /api/v1/mission-passes/{id}:
     get:
       operationId: missionPassGet
@@ -976,3 +1089,47 @@ components:
             type: string
         shaped_draft:
           type: object
+        mission_ref:
+          type: string
+        mission_hash:
+          type: string
+        approval_decision_ref:
+          type: string
+        attestation_digest:
+          type: string
+        run_id:
+          type: string
+    ApprovalBeginResponse:
+      type: object
+      required: [challenge_id, options]
+      properties:
+        challenge_id:
+          type: string
+        options:
+          description: >
+            Opaque WebAuthn request options JSON for the approval decision
+            ceremony, as produced by the server verifier.
+    ApprovalFinishRequest:
+      type: object
+      required: [challenge_id, assertion]
+      properties:
+        challenge_id:
+          type: string
+        assertion:
+          description: >
+            Opaque WebAuthn assertion JSON from the credential, as the
+            server verifier expects.
+    ApprovalResult:
+      type: object
+      required: [workspace_id, mission_ref, mission_hash, authscope_mission_version, approval_decision_ref]
+      properties:
+        workspace_id:
+          type: string
+        mission_ref:
+          type: string
+        mission_hash:
+          type: string
+        authscope_mission_version:
+          type: integer
+        approval_decision_ref:
+          type: string

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -22,6 +24,20 @@ type stubPassAuthority struct {
 	proposal        coreapi.Proposal
 	createErr       error
 	reconcileStatus string
+	// Approval stub fields (methods in approval_handlers_test.go).
+	mission             coreapi.Mission
+	approveErr          error
+	failApproveOnce     error
+	approveCalls        int
+	approveKeys         []string
+	prepareLaunchCalls  int
+	missionsCreated     int
+	approvedByKey       map[string]coreapi.Mission
+	signedAttestations  []identity.SignedDecisionAttestation
+	identityRoles       map[string][]string
+	identityKeys        map[string]ed25519.PublicKey
+	seenNonces          map[string]bool
+	expectedSubject     string
 }
 
 func (s *stubPassAuthority) ShapeMission(_ context.Context, in coreapi.ShapeMissionRequest, _ coreapi.RequestOptions) (coreapi.MissionDraft, error) {
@@ -90,6 +106,15 @@ func newPassFixture(t *testing.T) *passFixture {
 		},
 		reconcileStatus: "completed",
 	}
+	signer := identity.NewEphemeralSigner()
+	stub.identityRoles = map[string][]string{signer.IdentityDigest(): {coreapi.DecisionAttestorRole}}
+	stub.identityKeys = map[string]ed25519.PublicKey{signer.IdentityDigest(): signer.PublicKey()}
+	stub.seenNonces = make(map[string]bool)
+	stub.expectedSubject = "prop-1"
+	stub.mission = coreapi.Mission{
+		MissionID: "mission-1", MissionRef: "mission-1", WorkspaceID: "ws-test",
+		State: "active", Version: 3,
+	}
 	deps := Dependencies{
 		Config: f.config,
 		Contract: coreapi.ContractReport{
@@ -99,6 +124,7 @@ func newPassFixture(t *testing.T) *passFixture {
 		Store:     f.store,
 		Authn:     f.authn,
 		Authority: stub,
+		Attestor:  identity.NewDecisionAttestor(signer),
 	}
 	f.handler = New(deps)
 	csrf := f.enrollOverHTTP(t)

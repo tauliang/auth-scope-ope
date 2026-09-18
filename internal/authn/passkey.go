@@ -500,22 +500,46 @@ func (s *Service) BeginDecision(ctx context.Context, p Principal, purpose Decisi
 	return challenge, optionsJSON, nil
 }
 
+// VerifiedDecision is the authenticated local ceremony record returned by
+// FinishDecision. It carries only the facts needed to bind a decision
+// attestation: the ceremony identity and nonce, the verified authentication
+// method, and the session that performed the ceremony. It never embeds the
+// credential ID, the assertion, or any secret.
+type VerifiedDecision struct {
+	ChallengeID  string
+	Nonce        [32]byte
+	Method       string
+	UserVerified bool
+	WorkspaceID  string
+	SessionID    string
+	FounderID    string
+	SubjectID    string
+	Purpose      DecisionPurpose
+	VerifiedAt   time.Time
+}
+
+// authMethodWebAuthnUV names the authentication method reported by a
+// verified WebAuthn ceremony with user verification. It matches
+// identity.AuthMethodWebAuthnUV so verified decisions can be attested.
+const authMethodWebAuthnUV = "webauthn_uv"
+
 // FinishDecision verifies a decision assertion against the stored
-// challenge binding. The challenge is atomically consumed before
+// challenge binding and returns the verified ceremony record for decision
+// attestation. The challenge is atomically consumed before
 // verification, so a replay or a failed attempt cannot be retried with the
 // same challenge. The founder's passkey authentication must be fresher
 // than five minutes.
-func (s *Service) FinishDecision(ctx context.Context, p Principal, challengeID string, purpose DecisionPurpose, subjectID string, canonicalClaims []byte, assertion []byte) error {
+func (s *Service) FinishDecision(ctx context.Context, p Principal, challengeID string, purpose DecisionPurpose, subjectID string, canonicalClaims []byte, assertion []byte) (*VerifiedDecision, error) {
 	if !validDecisionPurpose(purpose) {
-		return ErrInvalidPurpose
+		return nil, ErrInvalidPurpose
 	}
 	ceremony, err := s.consumeCeremony(challengeID, ceremonyDecision)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	d := ceremony.decision
 	if d == nil {
-		return ErrDecisionBinding
+		return nil, ErrDecisionBinding
 	}
 	digest := sha256.Sum256(canonicalClaims)
 	if d.WorkspaceID != p.WorkspaceID ||
@@ -524,14 +548,14 @@ func (s *Service) FinishDecision(ctx context.Context, p Principal, challengeID s
 		d.SubjectID != subjectID ||
 		d.Purpose != purpose ||
 		d.Digest != digest {
-		return ErrDecisionBinding
+		return nil, ErrDecisionBinding
 	}
 	if s.now().UTC().Sub(p.AuthTime) > decisionAuthFreshness {
-		return ErrStaleAssertion
+		return nil, ErrStaleAssertion
 	}
 	verified, err := s.verifyAssertion(ctx, ceremony, assertion)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Advance the credential sign count exactly as login does, so clone
 	// detection keeps working across decision assertions.
@@ -541,10 +565,21 @@ func (s *Service) FinishDecision(ctx context.Context, p Principal, challengeID s
 			return tx.UpdateWebAuthnCredentialSignCount(ctx, s.instance.WorkspaceID, credID, verified.NewSignCount)
 		})
 		if err != nil {
-			return fmt.Errorf("authn: finish decision: %w", err)
+			return nil, fmt.Errorf("authn: finish decision: %w", err)
 		}
 	}
-	return nil
+	return &VerifiedDecision{
+		ChallengeID:  challengeID,
+		Nonce:        d.Nonce,
+		Method:       authMethodWebAuthnUV,
+		UserVerified: verified.UserVerified,
+		WorkspaceID:  d.WorkspaceID,
+		SessionID:    d.SessionID,
+		FounderID:    ceremony.founderID,
+		SubjectID:    d.SubjectID,
+		Purpose:      d.Purpose,
+		VerifiedAt:   s.now().UTC(),
+	}, nil
 }
 
 // verifyAssertion runs the verifier over a consumed assertion ceremony,

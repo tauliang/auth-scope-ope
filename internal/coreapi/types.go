@@ -343,6 +343,15 @@ type Mission struct {
 	WorkspaceID string `json:"workspace_id"`
 	State       string `json:"state"`
 	Version     int64  `json:"version"`
+	// MissionHash is the algorithm-tagged digest of the created mission.
+	// Older responses may omit it; approval then derives it locally.
+	MissionHash string `json:"mission_hash,omitempty"`
+	// ApprovalDecisionRef is the upstream reference for the signed
+	// approval decision. Older responses may omit it.
+	ApprovalDecisionRef string `json:"approval_decision_ref,omitempty"`
+	// AttestationDigest is the digest of the signed decision attestation.
+	// Older responses may omit it.
+	AttestationDigest string `json:"attestation_digest,omitempty"`
 }
 
 // MissionStatus is the introspected mission state.
@@ -506,8 +515,18 @@ type WorkspaceContainment struct {
 }
 
 // approveProposalRequest is the wire body for proposal approval.
+// ApproveProposalInput carries the exact proposal the approval decision
+// binds. AuthScope approves only when these digests match the proposal
+// under review; the browser never supplies them.
+type ApproveProposalInput struct {
+	ProposalDigest   string `json:"proposal_digest"`
+	InvocationDigest string `json:"invocation_digest"`
+}
+
 type approveProposalRequest struct {
-	Attestation map[string]any `json:"attestation"`
+	ProposalDigest   string         `json:"proposal_digest"`
+	InvocationDigest string         `json:"invocation_digest"`
+	Attestation      map[string]any `json:"attestation"`
 }
 
 // prepareLaunchRequest is the wire body for launch preparation.

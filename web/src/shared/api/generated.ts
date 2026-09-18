@@ -1,6 +1,24 @@
 // Code generated from openapi/ope-v1.yaml by scripts/generate-web-client.mjs.
 // Do not edit by hand; run `node scripts/generate-web-client.mjs` instead.
 
+export interface ApprovalBeginResponse {
+  challenge_id: string;
+  options: unknown;
+}
+
+export interface ApprovalFinishRequest {
+  assertion: unknown;
+  challenge_id: string;
+}
+
+export interface ApprovalResult {
+  approval_decision_ref: string;
+  authscope_mission_version: number;
+  mission_hash: string;
+  mission_ref: string;
+  workspace_id: string;
+}
+
 export interface BootstrapBeginRequest {
   code: string;
 }
@@ -138,7 +156,9 @@ export interface MissionPassReview {
   acceptance_criteria: string[];
   agent_kit_id: string;
   agent_kit_version: string;
+  approval_decision_ref?: string;
   approved_proposal_digest?: string;
+  attestation_digest?: string;
   authscope_mission_version: number;
   base_sha?: string;
   connection_id: string;
@@ -147,12 +167,15 @@ export interface MissionPassReview {
   issue_number: number;
   limits: MissionPassLimits;
   mission_branch?: string;
+  mission_hash?: string;
+  mission_ref?: string;
   objective: string;
   pass_id: string;
   proposal_digest: string;
   proposal_id: string;
   reconciliation: "settled" | "pending";
   repository_name: string;
+  run_id?: string;
   runner_arguments: string[];
   shaped_draft?: Record<string, never>;
   source_digest?: string;

@@ -108,6 +108,7 @@ func runServe() error {
 	handler := httpapi.New(httpapi.Dependencies{
 		Config: cfg, Contract: report, Store: st, Authn: authnSvc,
 		Gate: gate, Authority: gated,
+		Attestor: identity.NewDecisionAttestor(signer),
 	})
 	log.Printf("authscope-ope listening on %s (core %s)", cfg.BindAddr, report.CoreVersion)
 	return http.ListenAndServe(cfg.BindAddr, handler)

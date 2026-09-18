@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql
+//go:embed migrations/001_initial.sql migrations/002_authn.sql migrations/003_github.sql migrations/004_mission_pass_proposal.sql migrations/005_mission_pass_request_keys.sql migrations/006_mission_pass_approval.sql
 var migrationFS embed.FS
 
 // migrations lists the schema migrations in apply order. Each version is
@@ -35,6 +35,7 @@ var migrations = []struct {
 	{"003_github", "migrations/003_github.sql"},
 	{"004_mission_pass_proposal", "migrations/004_mission_pass_proposal.sql"},
 	{"005_mission_pass_request_keys", "migrations/005_mission_pass_request_keys.sql"},
+	{"006_mission_pass_approval", "migrations/006_mission_pass_approval.sql"},
 }
 
 // loadMigration reads one embedded migration file.
@@ -341,6 +342,94 @@ func (t *sqliteTx) BeginIdempotency(ctx context.Context, rec IdempotencyRecord) 
 
 func (t *sqliteTx) CompleteIdempotency(ctx context.Context, workspaceID, key string, result []byte) error {
 	return completeIdempotency(ctx, t.tx, workspaceID, key, result)
+}
+
+func (t *sqliteTx) PutApprovalIntent(ctx context.Context, rec ApprovalIntentRecord) error {
+	return putApprovalIntent(ctx, t.tx, rec)
+}
+
+func (t *sqliteTx) GetApprovalIntent(ctx context.Context, workspaceID, passID string) (ApprovalIntentRecord, error) {
+	return getApprovalIntent(ctx, t.tx, workspaceID, passID)
+}
+
+func (t *sqliteTx) CompleteApprovalIntent(ctx context.Context, workspaceID, passID string, operationRef string) error {
+	return completeApprovalIntent(ctx, t.tx, workspaceID, passID, operationRef)
+}
+
+// putApprovalIntent upserts the durable local intent for one approval
+// idempotency key. A retry with the same challenge and attestation is a
+// no-op; a retry with a different challenge refreshes the in-flight
+// intent. Completed intents are never rewritten.
+func putApprovalIntent(ctx context.Context, c dbConn, rec ApprovalIntentRecord) error {
+	if rec.WorkspaceID == "" || rec.PassID == "" || rec.IdempotencyKey == "" {
+		return fmt.Errorf("store: put approval intent: workspace, pass, and idempotency key are required")
+	}
+	if rec.State == "" {
+		rec.State = ApprovalIntentInFlight
+	}
+	now := formatTime(time.Now())
+	res, err := c.ExecContext(ctx, `INSERT INTO approval_intents
+		(workspace_id, pass_id, idempotency_key, operation_ref, state,
+		 challenge_id, attestation_digest, attestation_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, pass_id) DO UPDATE SET
+			operation_ref = CASE WHEN approval_intents.state = 'completed' THEN approval_intents.operation_ref ELSE excluded.operation_ref END,
+			state = CASE WHEN approval_intents.state = 'completed' THEN approval_intents.state ELSE excluded.state END,
+			challenge_id = CASE WHEN approval_intents.state = 'completed' THEN approval_intents.challenge_id ELSE excluded.challenge_id END,
+			attestation_digest = CASE WHEN approval_intents.state = 'completed' THEN approval_intents.attestation_digest ELSE excluded.attestation_digest END,
+			attestation_json = CASE WHEN approval_intents.state = 'completed' THEN approval_intents.attestation_json ELSE excluded.attestation_json END,
+			updated_at = excluded.updated_at`,
+		rec.WorkspaceID, rec.PassID, rec.IdempotencyKey, rec.OperationRef, rec.State,
+		rec.ChallengeID, rec.AttestationDigest, rec.AttestationJSON, now, now)
+	if err != nil {
+		return fmt.Errorf("store: put approval intent: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("store: put approval intent: unexpected rows affected: %v", err)
+	}
+	return nil
+}
+
+func getApprovalIntent(ctx context.Context, c dbConn, workspaceID, passID string) (ApprovalIntentRecord, error) {
+	var rec ApprovalIntentRecord
+	var created, updated string
+	err := c.QueryRowContext(ctx, `SELECT workspace_id, pass_id, idempotency_key,
+		operation_ref, state, challenge_id, attestation_digest, attestation_json, created_at, updated_at
+		FROM approval_intents WHERE workspace_id = ? AND pass_id = ?`, workspaceID, passID).
+		Scan(&rec.WorkspaceID, &rec.PassID, &rec.IdempotencyKey,
+			&rec.OperationRef, &rec.State, &rec.ChallengeID, &rec.AttestationDigest,
+			&rec.AttestationJSON, &created, &updated)
+	if err == sql.ErrNoRows {
+		return ApprovalIntentRecord{}, fmt.Errorf("%w: approval intent for pass %q", ErrNotFound, passID)
+	}
+	if err != nil {
+		return ApprovalIntentRecord{}, fmt.Errorf("store: get approval intent: %w", err)
+	}
+	if rec.CreatedAt, err = parseTime(created); err != nil {
+		return ApprovalIntentRecord{}, fmt.Errorf("store: get approval intent: %w", err)
+	}
+	if rec.UpdatedAt, err = parseTime(updated); err != nil {
+		return ApprovalIntentRecord{}, fmt.Errorf("store: get approval intent: %w", err)
+	}
+	return rec, nil
+}
+
+func completeApprovalIntent(ctx context.Context, c dbConn, workspaceID, passID string, operationRef string) error {
+	res, err := c.ExecContext(ctx, `UPDATE approval_intents
+		SET state = 'completed', operation_ref = ?, updated_at = ?
+		WHERE workspace_id = ? AND pass_id = ? AND state = 'in_flight'`,
+		operationRef, formatTime(time.Now()), workspaceID, passID)
+	if err != nil {
+		return fmt.Errorf("store: complete approval intent: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: complete approval intent: %w", err)
+	}
+	if n != 1 {
+		return fmt.Errorf("%w: approval intent for pass %q", ErrNotFound, passID)
+	}
+	return nil
 }
 
 func bindInstance(ctx context.Context, c dbConn, mode string, rec InstanceRecord) error {
@@ -769,6 +858,11 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		    shaped_draft_json = ?,
 		    state = ?,
 		    reconciliation = ?,
+		    mission_ref = ?,
+		    mission_hash = ?,
+		    approval_decision_ref = ?,
+		    attestation_digest = ?,
+		    run_id = ?,
 		    updated_at = ?
 		WHERE workspace_id = ? AND pass_id = ? AND store_revision = ?`,
 		rec.DraftVersion, rec.AuthScopeMissionVersion,
@@ -778,7 +872,9 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		rec.AgentKitID, rec.AgentKitVersion, runnerArgs, rec.InvocationDigest,
 		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros,
 		rec.Objective, criteria, rec.ShapedDraftJSON,
-		rec.State, rec.Reconciliation, now,
+		rec.State, rec.Reconciliation,
+		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef,
+		rec.AttestationDigest, rec.RunID, now,
 		rec.WorkspaceID, rec.PassID, expectedStoreRevision)
 	if err != nil {
 		return fmt.Errorf("store: put mission pass: %w", err)
@@ -800,8 +896,10 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		 source_revision, source_digest, base_sha, mission_branch,
 		 agent_kit_id, agent_kit_version, runner_arguments, invocation_digest,
 		 expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
-		 shaped_draft_json, state, reconciliation, created_at, updated_at)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 shaped_draft_json, state, reconciliation,
+		 mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
+		 created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.WorkspaceID, rec.PassID, rec.DraftVersion, rec.AuthScopeMissionVersion,
 		rec.ConnectionID, rec.IssueNumber, rec.RepositoryName,
 		rec.ProposalID, rec.ProposalDigest, rec.ApprovedProposalDigest,
@@ -809,6 +907,7 @@ func putMissionPass(ctx context.Context, c dbConn, rec MissionPassRecord, expect
 		rec.AgentKitID, rec.AgentKitVersion, runnerArgs, rec.InvocationDigest,
 		formatOptionalTime(rec.ExpiresAt), rec.MaxAggregateCostMicros, rec.Objective, criteria,
 		rec.ShapedDraftJSON, rec.State, rec.Reconciliation,
+		rec.MissionRef, rec.MissionHash, rec.ApprovalDecisionRef, rec.AttestationDigest, rec.RunID,
 		formatTime(rec.CreatedAt), now)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -825,7 +924,9 @@ const missionPassColumns = `workspace_id, pass_id, store_revision, draft_version
 	source_revision, source_digest, base_sha, mission_branch,
 	agent_kit_id, agent_kit_version, runner_arguments, invocation_digest,
 	expires_at, max_aggregate_cost_micros, objective, acceptance_criteria,
-	shaped_draft_json, state, reconciliation, created_at, updated_at`
+	shaped_draft_json, state, reconciliation,
+	mission_ref, mission_hash, approval_decision_ref, attestation_digest, run_id,
+	created_at, updated_at`
 
 func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (MissionPassRecord, error) {
 	var rec MissionPassRecord
@@ -838,7 +939,9 @@ func getMissionPass(ctx context.Context, c dbConn, workspaceID, passID string) (
 			&rec.SourceRevision, &rec.SourceDigest, &rec.BaseSHA, &rec.MissionBranch,
 			&rec.AgentKitID, &rec.AgentKitVersion, &runnerArgs, &rec.InvocationDigest,
 			&expires, &rec.MaxAggregateCostMicros, &rec.Objective, &criteria,
-			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation, &created, &updated)
+			&rec.ShapedDraftJSON, &rec.State, &rec.Reconciliation,
+		&rec.MissionRef, &rec.MissionHash, &rec.ApprovalDecisionRef,
+		&rec.AttestationDigest, &rec.RunID, &created, &updated)
 	if err == sql.ErrNoRows {
 		return MissionPassRecord{}, fmt.Errorf("%w: mission pass %q", ErrNotFound, passID)
 	}

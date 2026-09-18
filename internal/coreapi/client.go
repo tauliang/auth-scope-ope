@@ -39,7 +39,7 @@ type Authority interface {
 	ListAgentKits(context.Context, RequestOptions) ([]AgentKit, error)
 	ShapeMission(context.Context, ShapeMissionRequest, RequestOptions) (MissionDraft, error)
 	CreateProposal(context.Context, CreateProposalRequest, RequestOptions) (Proposal, error)
-	ApproveProposal(context.Context, string, identity.SignedDecisionAttestation, RequestOptions) (Mission, error)
+	ApproveProposal(context.Context, string, ApproveProposalInput, identity.SignedDecisionAttestation, RequestOptions) (Mission, error)
 	PrepareLaunch(context.Context, string, LaunchRequest, identity.SignedDecisionAttestation, RequestOptions) (LaunchArtifacts, error)
 	IntrospectMission(context.Context, string, RequestOptions) (MissionStatus, error)
 	RevokeMission(context.Context, string, RevokeRequest, identity.SignedDecisionAttestation, RequestOptions) (Revocation, error)
@@ -472,14 +472,19 @@ func (c *Client) CreateProposal(ctx context.Context, in CreateProposalRequest, o
 }
 
 // ApproveProposal approves a proposal with a signed decision attestation.
-func (c *Client) ApproveProposal(ctx context.Context, proposalID string, att identity.SignedDecisionAttestation, opts RequestOptions) (Mission, error) {
+func (c *Client) ApproveProposal(ctx context.Context, proposalID string, in ApproveProposalInput, att identity.SignedDecisionAttestation, opts RequestOptions) (Mission, error) {
 	env, err := attestationEnvelope(att)
 	if err != nil {
 		return Mission{}, err
 	}
 	var out Mission
 	path := "/v1/mission-proposals/" + pathEscape(proposalID) + "/approve"
-	if err := c.do(ctx, http.MethodPost, path, nil, approveProposalRequest{Attestation: env}, &out, opts); err != nil {
+	body := approveProposalRequest{
+		ProposalDigest:   in.ProposalDigest,
+		InvocationDigest: in.InvocationDigest,
+		Attestation:      env,
+	}
+	if err := c.do(ctx, http.MethodPost, path, nil, body, &out, opts); err != nil {
 		return Mission{}, err
 	}
 	return out, nil
@@ -711,11 +716,11 @@ func (g *GatedAuthority) CreateProposal(ctx context.Context, in CreateProposalRe
 	return g.inner.CreateProposal(ctx, in, opts)
 }
 
-func (g *GatedAuthority) ApproveProposal(ctx context.Context, proposalID string, att identity.SignedDecisionAttestation, opts RequestOptions) (Mission, error) {
+func (g *GatedAuthority) ApproveProposal(ctx context.Context, proposalID string, in ApproveProposalInput, att identity.SignedDecisionAttestation, opts RequestOptions) (Mission, error) {
 	if err := g.checkMutation(); err != nil {
 		return Mission{}, err
 	}
-	return g.inner.ApproveProposal(ctx, proposalID, att, opts)
+	return g.inner.ApproveProposal(ctx, proposalID, in, att, opts)
 }
 
 func (g *GatedAuthority) PrepareLaunch(ctx context.Context, missionRef string, in LaunchRequest, att identity.SignedDecisionAttestation, opts RequestOptions) (LaunchArtifacts, error) {

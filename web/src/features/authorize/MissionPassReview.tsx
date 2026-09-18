@@ -7,6 +7,7 @@ import {
   reviseMissionPassDraft,
 } from '../../shared/api/client';
 import type { MissionPassReview as MissionPassReviewPayload } from '../../shared/api/generated';
+import { ApprovalCard } from './ApprovalCard';
 
 // Fixed template values for presentation. Source of truth is
 // internal/missionpass/template.go; these never vary per draft, so the
@@ -334,6 +335,7 @@ export function MissionPassReview({
           <dd>{review.draft_version}</dd>
         </dl>
       </details>
+      <ApprovalCard review={review} onChanged={onRevised} />
     </article>
   );
 }

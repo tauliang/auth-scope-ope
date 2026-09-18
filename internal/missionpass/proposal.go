@@ -724,6 +724,11 @@ func toStoreRecord(rec persistedPass) store.MissionPassRecord {
 		ShapedDraftJSON:         rec.ShapedDraftJSON,
 		State:                   string(r.State),
 		Reconciliation:          string(r.Reconciliation),
+		MissionRef:              r.MissionRef,
+		MissionHash:             r.MissionHash,
+		ApprovalDecisionRef:     r.ApprovalDecisionRef,
+		AttestationDigest:       r.AttestationDigest,
+		RunID:                   r.RunID,
 	}
 }
 
@@ -749,6 +754,11 @@ func fromStoreRecord(stored store.MissionPassRecord) persistedPass {
 			Limits:                  EditableLimits{ExpiresAt: stored.ExpiresAt, MaxAggregateCostMicros: stored.MaxAggregateCostMicros},
 			State:                   PassState(stored.State),
 			Reconciliation:          ReconciliationState(stored.Reconciliation),
+			MissionRef:              stored.MissionRef,
+			MissionHash:             stored.MissionHash,
+			ApprovalDecisionRef:     stored.ApprovalDecisionRef,
+			AttestationDigest:       stored.AttestationDigest,
+			RunID:                   stored.RunID,
 		},
 		ConnectionID:       stored.ConnectionID,
 		IssueNumber:        stored.IssueNumber,

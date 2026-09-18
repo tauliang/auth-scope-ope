@@ -10,6 +10,7 @@ import (
 	"github.com/tauliang/authscope-ope/internal/authn"
 	"github.com/tauliang/authscope-ope/internal/config"
 	"github.com/tauliang/authscope-ope/internal/coreapi"
+	"github.com/tauliang/authscope-ope/internal/identity"
 	"github.com/tauliang/authscope-ope/internal/store"
 )
 
@@ -32,6 +33,10 @@ type Dependencies struct {
 	Gate *coreapi.Gate
 	// Authority is the gated AuthScope client for later services.
 	Authority coreapi.Authority
+	// Attestor signs approval decision attestations with the workload
+	// key. Nil in tests that do not exercise the approval routes; the
+	// approval routes are registered only when it is present.
+	Attestor *identity.DecisionAttestor
 }
 
 // WorkspaceBinding is the immutable binding of this instance, once Task 2

@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -50,6 +51,19 @@ type ProposalRecord struct {
 	Limits                  EditableLimits      `json:"limits"`
 	State                   PassState           `json:"state"`
 	Reconciliation          ReconciliationState `json:"reconciliation"`
+	// MissionRef is the upstream mission reference created by approval,
+	// empty until the pass is approved.
+	MissionRef string `json:"mission_ref"`
+	// MissionHash is the algorithm-tagged digest of the created mission.
+	MissionHash string `json:"mission_hash"`
+	// ApprovalDecisionRef is the local reference for the signed approval
+	// decision attestation.
+	ApprovalDecisionRef string `json:"approval_decision_ref"`
+	// AttestationDigest is the sha256 digest of the signed decision
+	// attestation produced at approval time.
+	AttestationDigest string `json:"attestation_digest"`
+	// RunID stays empty on approval: approval creates only the mission.
+	RunID string `json:"run_id"`
 }
 
 // PassState is the lifecycle state of a mission pass. Terminal states
@@ -140,16 +154,24 @@ func writeApprovalField(b *bytes.Buffer, s string) {
 
 // CanonicalApprovalBytes returns the exact canonical bytes the founder's
 // passkey decision binds to: the domain separator, the workspace and pass
-// IDs, and AuthScope's exact proposal and invocation digests. Every field
-// is length-prefixed so ambiguous concatenations cannot collide. Task 7's
-// approval flow signs these bytes; the decision attests the proposal and
-// invocation digests the founder reviewed, nothing else.
+// IDs, the draft version, AuthScope's exact proposal ID, proposal and
+// invocation digests, and the pinned source digest and base SHA. Every
+// field is length-prefixed so ambiguous concatenations cannot collide.
+// Task 7's approval flow signs these bytes; the founder's WebAuthn ceremony
+// and the decision attestation additionally bind the founder, session,
+// purpose, audience, nonce, and expiry, so the challenge digest needs only
+// the proposal-content fields. There is exactly one canonicalization: all
+// approval code paths reuse this helper.
 func CanonicalApprovalBytes(record ProposalRecord) []byte {
 	var b bytes.Buffer
 	b.WriteString(approvalDomain)
 	writeApprovalField(&b, record.WorkspaceID)
 	writeApprovalField(&b, record.PassID)
+	writeApprovalField(&b, strconv.FormatInt(record.DraftVersion, 10))
+	writeApprovalField(&b, record.ProposalID)
 	writeApprovalField(&b, record.ProposalDigest)
 	writeApprovalField(&b, record.InvocationDigest)
+	writeApprovalField(&b, record.SourceDigest)
+	writeApprovalField(&b, record.BaseSHA)
 	return b.Bytes()
 }

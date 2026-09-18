@@ -162,6 +162,15 @@ type Tx interface {
 	BeginIdempotency(context.Context, IdempotencyRecord) (IdempotencyResult, error)
 	// CompleteIdempotency records the result of an in-flight operation.
 	CompleteIdempotency(ctx context.Context, workspaceID, key string, result []byte) error
+	// PutApprovalIntent upserts the durable local intent for an approval
+	// idempotency key. It is written before the upstream approval call so
+	// an ambiguous outcome can be reconciled without re-issuing approval.
+	PutApprovalIntent(ctx context.Context, rec ApprovalIntentRecord) error
+	// GetApprovalIntent returns the durable approval intent for a pass.
+	GetApprovalIntent(ctx context.Context, workspaceID, passID string) (ApprovalIntentRecord, error)
+	// CompleteApprovalIntent marks the approval intent completed with the
+	// upstream operation reference.
+	CompleteApprovalIntent(ctx context.Context, workspaceID, passID string, operationRef string) error
 	// CreateFounder enrolls a founder. A second founder in the same
 	// workspace returns ErrConflict: v1 serves exactly one founder per
 	// instance.
@@ -251,8 +260,51 @@ type MissionPassRecord struct {
 	ShapedDraftJSON         string
 	State                   string
 	Reconciliation          string
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	// MissionRef is the upstream AuthScope mission reference created by
+	// approval. It is empty until the pass is approved.
+	MissionRef string
+	// MissionHash is the algorithm-tagged digest of the created mission.
+	MissionHash string
+	// ApprovalDecisionRef is the local reference for the signed approval
+	// decision attestation.
+	ApprovalDecisionRef string
+	// AttestationDigest is the sha256 digest of the signed decision
+	// attestation produced at approval time.
+	AttestationDigest string
+	// RunID stays empty on approval: approval creates only the mission, and
+	// a launch run is created later.
+	RunID     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ApprovalIntentState values for ApprovalIntentRecord.
+const (
+	// ApprovalIntentInFlight means an approval upstream call is in progress
+	// or its outcome is unknown; reconciliation may settle it.
+	ApprovalIntentInFlight = "in_flight"
+	// ApprovalIntentCompleted means the approval settled and the pass was
+	// persisted as approved.
+	ApprovalIntentCompleted = "completed"
+)
+
+// ApprovalIntentRecord is the durable local intent behind one approval
+// idempotency key. It is written before the upstream ApproveProposal call
+// so an ambiguous upstream outcome (timeout, dropped response, crash) can
+// be reconciled later without ever re-issuing the approval.
+type ApprovalIntentRecord struct {
+	WorkspaceID       string
+	PassID            string
+	IdempotencyKey    string
+	OperationRef      string
+	State             string
+	ChallengeID       string
+	AttestationDigest string
+	// AttestationJSON is the original signed decision attestation, so an
+	// idempotent replay carries the exact original call.
+	AttestationJSON string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // MissionEventRecord is one projected, allowlisted event for a pass.
